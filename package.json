@@ -1,0 +1,22 @@
+{
+  "name": "mcp-xhs-poster",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@types/pngjs": "^6.0.5",
+    "@types/qrcode": "^1.5.6",
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
+    "puppeteer": "^24.2.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "qrcode": "^1.5.4",
+    "zod": "^3.24.2"
+  }
+}
