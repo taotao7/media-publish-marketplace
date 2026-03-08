@@ -4,26 +4,66 @@ import { join } from "node:path"
 import { createMcpServer, z } from "./mcp.js"
 import type { CallToolResult } from "./mcp.js"
 import { launchBrowser } from "./browser.js"
-import { deleteCookies, getCookiePath } from "./cookies.js"
+import { deleteCookies, getCookiePath, listAccounts } from "./cookies.js"
 import { checkLoginStatus, fetchQrcode, waitForLogin } from "./login.js"
 import { publishContent } from "./publish.js"
 import { qrcodeToCleanPng } from "./qrcode.js"
 import { uploadToR2 } from "./r2.js"
 
+const DEFAULT_ACCOUNT = "default"
+
+const accountParam = z
+  .string()
+  .optional()
+  .describe(
+    "Account name for multi-account management. Defaults to 'default'. Each account stores its own cookies separately.",
+  )
+
 const { server, connect } = createMcpServer({
   name: "mcp-xhs-poster",
   version: "0.1.0",
-  description: "Xiaohongshu poster — login, publish image posts, manage cookies",
+  description:
+    "Xiaohongshu poster — login, publish image posts, manage cookies. Supports multiple accounts.",
 })
+
+// ── list_accounts ─────────────────────────────────────────────────
+
+server.tool(
+  "list_accounts",
+  "List all saved Xiaohongshu accounts that have stored cookies.",
+  {},
+  async (): Promise<CallToolResult> => {
+    const accounts = listAccounts()
+    if (accounts.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No accounts found. Use get_login_qrcode to log in with a new account.",
+          },
+        ],
+      }
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Saved accounts (${accounts.length}):\n${accounts.map((a) => `  - ${a}`).join("\n")}`,
+        },
+      ],
+    }
+  },
+)
 
 // ── check_login_status ───────────────────────────────────────────────
 
 server.tool(
   "check_login_status",
   "Check whether the current saved cookies represent a valid Xiaohongshu login session.",
-  {},
-  async (): Promise<CallToolResult> => {
-    const managed = await launchBrowser()
+  { account: accountParam },
+  async ({ account }): Promise<CallToolResult> => {
+    const acct = account || DEFAULT_ACCOUNT
+    const managed = await launchBrowser(acct)
     try {
       const { loggedIn } = await checkLoginStatus(managed.page)
       return {
@@ -31,8 +71,8 @@ server.tool(
           {
             type: "text",
             text: loggedIn
-              ? "Logged in to Xiaohongshu."
-              : "Not logged in. Use get_login_qrcode to authenticate.",
+              ? `Account '${acct}' is logged in to Xiaohongshu.`
+              : `Account '${acct}' is not logged in. Use get_login_qrcode to authenticate.`,
           },
         ],
       }
@@ -49,16 +89,22 @@ server.tool(
 server.tool(
   "get_login_qrcode",
   "Get a QR code image for Xiaohongshu login. After returning the QR code, the tool polls in the background for up to 4 minutes waiting for the user to scan. Cookies are saved automatically on success.",
-  {},
-  async (): Promise<CallToolResult> => {
-    const managed = await launchBrowser()
+  { account: accountParam },
+  async ({ account }): Promise<CallToolResult> => {
+    const acct = account || DEFAULT_ACCOUNT
+    const managed = await launchBrowser(acct)
     try {
       const result = await fetchQrcode(managed.page)
 
       if (result.alreadyLoggedIn) {
         await managed.close()
         return {
-          content: [{ type: "text", text: "Already logged in — no QR code needed." }],
+          content: [
+            {
+              type: "text",
+              text: `Account '${acct}' is already logged in — no QR code needed.`,
+            },
+          ],
         }
       }
 
@@ -79,7 +125,7 @@ server.tool(
       const base64Data = result.img!.replace(/^data:image\/\w+;base64,/, "")
       const qrDir = join(homedir(), ".media-mcp")
       mkdirSync(qrDir, { recursive: true })
-      const qrPath = join(qrDir, "qrcode.png")
+      const qrPath = join(qrDir, `qrcode-${acct}.png`)
       writeFileSync(qrPath, Buffer.from(base64Data, "base64"))
 
       let cleanBase64: string | undefined
@@ -100,6 +146,7 @@ server.tool(
             type: "text",
             text: [
               `QR code saved to: ${qrPath}`,
+              `Account: ${acct}`,
               `Please open this file with an image viewer (e.g. run: open "${qrPath}") and scan it with the Xiaohongshu app to log in.`,
               `Waiting up to 4 minutes for login…`,
             ].join("\n"),
@@ -119,6 +166,7 @@ server.tool(
   "publish_content",
   "Publish an image post to Xiaohongshu. Requires prior login (cookies must exist). Uploads local image files, fills in title/content/tags, and optionally schedules the post.",
   {
+    account: accountParam,
     title: z.string().describe("Post title"),
     content: z.string().describe("Post body text"),
     images: z
@@ -139,10 +187,21 @@ server.tool(
     attachments: z
       .array(z.string())
       .optional()
-      .describe("Absolute paths to local attachment files (e.g. prompt.txt)"),
+      .describe(
+        "Absolute paths to local attachment files (e.g. prompt.txt)",
+      ),
   },
-  async ({ title, content, images, tags, schedule_at, attachments }): Promise<CallToolResult> => {
-    const managed = await launchBrowser()
+  async ({
+    account,
+    title,
+    content,
+    images,
+    tags,
+    schedule_at,
+    attachments,
+  }): Promise<CallToolResult> => {
+    const acct = account || DEFAULT_ACCOUNT
+    const managed = await launchBrowser(acct)
     try {
       await publishContent(managed.page, {
         title,
@@ -158,13 +217,15 @@ server.tool(
           {
             type: "text",
             text: schedule_at
-              ? `Post scheduled for ${schedule_at}.`
-              : "Post published successfully.",
+              ? `Post scheduled for ${schedule_at} (account: ${acct}).`
+              : `Post published successfully (account: ${acct}).`,
           },
         ],
       }
     } catch (error) {
-      console.error("[publish] ERROR — keeping browser open 30s for inspection")
+      console.error(
+        "[publish] ERROR — keeping browser open 30s for inspection",
+      )
       await new Promise((r) => setTimeout(r, 30_000))
       return errorResult(`Publish failed: ${String(error)}`)
     } finally {
@@ -185,9 +246,7 @@ server.tool(
     try {
       const url = await uploadToR2(file_path)
       return {
-        content: [
-          { type: "text", text: url },
-        ],
+        content: [{ type: "text", text: url }],
       }
     } catch (error) {
       return errorResult(`Image upload failed: ${String(error)}`)
@@ -199,15 +258,19 @@ server.tool(
 
 server.tool(
   "delete_cookies",
-  "Delete saved Xiaohongshu cookies to reset login state.",
-  {},
-  async (): Promise<CallToolResult> => {
+  "Delete saved Xiaohongshu cookies to reset login state for a specific account.",
+  { account: accountParam },
+  async ({ account }): Promise<CallToolResult> => {
+    const acct = account || DEFAULT_ACCOUNT
     try {
-      const path = getCookiePath()
-      await deleteCookies()
+      const path = getCookiePath(acct)
+      await deleteCookies(acct)
       return {
         content: [
-          { type: "text", text: `Cookies deleted: ${path}` },
+          {
+            type: "text",
+            text: `Cookies deleted for account '${acct}': ${path}`,
+          },
         ],
       }
     } catch (error) {

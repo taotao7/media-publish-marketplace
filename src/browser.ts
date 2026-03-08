@@ -11,7 +11,7 @@ export interface ManagedBrowser {
   readonly close: () => Promise<void>;
 }
 
-export async function launchBrowser(): Promise<ManagedBrowser> {
+export async function launchBrowser(account: string): Promise<ManagedBrowser> {
   const headless = process.env.XHS_HEADLESS !== "false";
 
   const browser: Browser = (await puppeteer.launch({
@@ -22,7 +22,7 @@ export async function launchBrowser(): Promise<ManagedBrowser> {
   const page: Page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 800 });
 
-  const cookies = await loadCookies();
+  const cookies = await loadCookies(account);
   if (cookies.length > 0) {
     await page.setCookie(...(cookies as CookieParam[]));
   }
@@ -31,7 +31,7 @@ export async function launchBrowser(): Promise<ManagedBrowser> {
     page,
     saveCookies: async () => {
       const current = await page.cookies();
-      await saveCookies(current);
+      await saveCookies(current, account);
     },
     close: async () => {
       await page.close().catch(() => {});
