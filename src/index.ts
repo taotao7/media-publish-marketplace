@@ -445,148 +445,49 @@ async function editNote(
   console.error("[edit] waiting for publish page to load...")
   await page.waitForSelector(TITLE_INPUT, { timeout: 15_000 })
 
-  // Update title if provided
-  if (params.title) {
-    console.error("[edit] updating title...")
-    const titleInput = await page.$(TITLE_INPUT)
-    if (titleInput) {
-      await titleInput.click({ clickCount: 3 })
-      await delay(100)
-      await page.keyboard.press("Backspace")
-      await titleInput.type(params.title, { delay: 30 })
-      await delay(500)
-
-      const tooLong = await page.$(TITLE_MAX_SUFFIX)
-      if (tooLong) {
-        throw new Error("Title exceeds maximum length")
-      }
-    }
-  }
-
-  // Update content if provided
-  if (params.content) {
-    console.error("[edit] updating content...")
-    const editor = await page.$(CONTENT_EDITOR)
-    if (editor) {
-      // Select all existing content and replace
-      await editor.click()
-      await page.keyboard.down("Meta")
-      await page.keyboard.press("a")
-      await page.keyboard.up("Meta")
-      await delay(100)
-      await page.keyboard.press("Backspace")
-      await delay(300)
-      await page.keyboard.type(params.content, { delay: 10 })
-      await delay(500)
-
-      const tooLong = await page.$(CONTENT_LENGTH_ERROR)
-      if (tooLong) {
-        throw new Error("Content exceeds maximum length")
-      }
-    }
-  }
-
-  // Add tags if provided (appended after content)
-  if (params.tags && params.tags.length > 0) {
-    console.error("[edit] adding tags...")
-    // Move to end of content
-    const editor = await page.$(CONTENT_EDITOR)
-    if (editor) {
-      await editor.click()
-      for (let i = 0; i < 20; i++) {
-        await page.keyboard.press("ArrowDown")
-      }
-      await page.keyboard.press("Enter")
-      await page.keyboard.press("Enter")
-      await delay(300)
-
-      for (const tag of params.tags.slice(0, 10)) {
-        await page.keyboard.type(`#${tag}`, { delay: 30 })
-        await delay(1000)
-
-        try {
-          await page.waitForSelector(`${TOPIC_CONTAINER} ${TOPIC_ITEM}`, {
-            timeout: 5000,
-          })
-          const item = await page.$(`${TOPIC_CONTAINER} ${TOPIC_ITEM}`)
-          if (item) {
-            await item.click()
-          }
-        } catch {
-          // Topic suggestion didn't appear
-        }
-        await delay(500)
-      }
-    }
-  }
-
-  // Replace images if provided
-  // Strategy: upload new images first, then delete old ones (XHS requires at least 1 image)
+  // ── Replace images ──────────────────────────────────────────────
+  // XHS requires ≥1 image AND has an upper limit, so:
+  //   1. Delete all old images except the last one
+  //   2. Upload all new images
+  //   3. Delete the remaining old image
   if (params.images && params.images.length > 0) {
     console.error("[edit] replacing images...")
+    const oldImageCount = await page.$$eval(IMG_PREVIEW, (els) => els.length)
+    console.error(`[edit] existing images: ${oldImageCount}`)
 
-    const oldCount = await page.$$eval(".img-preview-area .pr", (els) => els.length)
-    console.error(`[edit] existing images: ${oldCount}`)
-
-    // Step 1: Upload all new images
-    for (let i = 0; i < params.images.length; i++) {
-      const input = await page.$('input[type="file"][accept*="jpg"]') as ElementHandle<HTMLInputElement> | null
-      if (!input) throw new Error(`Upload file input not found (index ${i})`)
-      console.error(`[edit] uploading image ${i + 1}/${params.images.length}: ${params.images[i]}`)
-      await input.uploadFile(params.images[i])
-      // Wait for preview count to increase
-      const expectedCount = oldCount + i + 1
-      const deadline = Date.now() + 60_000
-      while (Date.now() < deadline) {
-        const count = await page.$$eval(".img-preview-area .pr", (els) => els.length)
-        if (count >= expectedCount) break
-        await delay(500)
-      }
-    }
-    console.error("[edit] new images uploaded")
-
-    // Step 2: Delete old images (they are at the front of the list)
-    for (let i = 0; i < oldCount; i++) {
-      console.error(`[edit] removing old image ${i + 1}/${oldCount}...`)
-      // Always delete the first .pr (old images are at the front)
-      const firstPr = await page.$(".img-preview-area .pr")
-      if (!firstPr) break
-
-      // Hover to reveal close button
-      const box = await firstPr.boundingBox()
-      if (box) {
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-        await delay(500)
-      }
-
-      // Click close button
-      const closeBtn = await firstPr.$(".close-btn")
-      if (closeBtn) {
-        // Force visible and click
-        await page.evaluate((btn) => {
-          const el = btn as HTMLElement
-          el.style.cssText = "display:flex !important; opacity:1 !important; visibility:visible !important;"
-        }, closeBtn)
-        await delay(200)
-        await closeBtn.click()
-      } else {
-        // Fallback: force show + click at coords
-        await page.evaluate(() => {
-          const btn = document.querySelector(".img-preview-area .pr:first-child .close-btn") as HTMLElement
-          if (btn) {
-            btn.style.cssText = "display:flex !important; opacity:1 !important; visibility:visible !important;"
-            btn.click()
-          }
-        })
-      }
-      await delay(1000)
+    // Step 1: delete old images, keep the last one
+    if (oldImageCount > 1) {
+      await editDeleteFirstNImages(page, oldImageCount - 1)
     }
 
-    const finalCount = await page.$$eval(".img-preview-area .pr", (els) => els.length)
-    console.error(`[edit] final image count: ${finalCount}`)
+    // Step 2: upload all new images (now only 1 old image remains)
+    const remainingBefore = await page.$$eval(IMG_PREVIEW, (els) => els.length)
+    await editUploadImages(page, params.images, remainingBefore)
+
+    // Step 3: delete the last old image (it's the first in the list)
+    console.error("[edit] deleting the last old image...")
+    await editDeleteFirstNImages(page, 1)
   }
 
-  // Click publish/save button
+  // ── Update title: clear then retype ─────────────────────────────
+  if (params.title) {
+    console.error("[edit] updating title...")
+    await editClearAndFillTitle(page, params.title)
+  }
+
+  // ── Update content: clear then retype ───────────────────────────
+  if (params.content) {
+    console.error("[edit] updating content...")
+    await editClearAndFillContent(page, params.content)
+  }
+
+  // ── Add tags (appended after content) ───────────────────────────
+  if (params.tags && params.tags.length > 0) {
+    console.error("[edit] adding tags...")
+    await editFillTags(page, params.tags)
+  }
+
+  // ── Click publish/save button ───────────────────────────────────
   console.error("[edit] clicking save/publish button...")
   await dismissPopover(page)
 
@@ -594,7 +495,6 @@ async function editNote(
   if (btn) {
     await btn.evaluate((el) => (el as HTMLElement).click())
   } else {
-    // Fallback: find button with "发布" or "保存" text
     const clicked = await page.evaluate(() => {
       const buttons = document.querySelectorAll("button")
       for (const b of buttons) {
@@ -611,6 +511,222 @@ async function editNote(
 
   await delay(3000)
   console.error("[edit] done!")
+}
+
+// ── edit helpers ─────────────────────────────────────────────────────
+
+async function editUploadImages(
+  page: Page,
+  images: string[],
+  oldImageCount: number,
+): Promise<void> {
+  for (let i = 0; i < images.length; i++) {
+    // Find any file input that accepts images
+    let input = await page.$('input[type="file"][accept*="image"]') as ElementHandle<HTMLInputElement> | null
+    if (!input) {
+      input = await page.$('input[type="file"][accept*="jpg"]') as ElementHandle<HTMLInputElement> | null
+    }
+    if (!input) {
+      input = await page.$('input[type="file"]') as ElementHandle<HTMLInputElement> | null
+    }
+    if (!input) {
+      // Maybe we need to click the upload area first
+      const uploadArea = await page.$(".upload-input")
+      if (uploadArea) {
+        await uploadArea.click()
+        await delay(1000)
+        input = await page.$('input[type="file"]') as ElementHandle<HTMLInputElement> | null
+      }
+    }
+    if (!input) throw new Error(`Upload file input not found (image ${i + 1})`)
+
+    console.error(`[edit] uploading image ${i + 1}/${images.length}: ${images[i]}`)
+    await input.uploadFile(images[i])
+
+    // Wait for preview count to reach expected (old + newly uploaded)
+    const expectedCount = oldImageCount + i + 1
+    const deadline = Date.now() + 60_000
+    while (Date.now() < deadline) {
+      const currentCount = await page.$$eval(IMG_PREVIEW, (els) => els.length)
+      if (currentCount >= expectedCount) break
+      await delay(500)
+    }
+    console.error(`[edit] image ${i + 1} uploaded`)
+  }
+
+  console.error(`[edit] all ${images.length} new images uploaded`)
+}
+
+async function editDeleteFirstNImages(page: Page, n: number): Promise<void> {
+  console.error(`[edit] deleting first ${n} images...`)
+
+  for (let i = 0; i < n; i++) {
+    console.error(`[edit] deleting image ${i + 1}/${n}...`)
+
+    // Always delete the first preview element (old images are at the front)
+    const deleted = await page.evaluate((previewSel) => {
+      const firstPr = document.querySelector(previewSel) as HTMLElement | null
+      if (!firstPr) return false
+
+      // Find the close button inside
+      const closeBtn = firstPr.querySelector(".close-btn") as HTMLElement | null
+      if (closeBtn) {
+        closeBtn.style.cssText =
+          "display:flex !important; opacity:1 !important; visibility:visible !important; pointer-events:auto !important;"
+        closeBtn.click()
+        return true
+      }
+
+      // Fallback: try any element that looks like a close/delete button
+      const anyClose = firstPr.querySelector(
+        '[class*="close"], [class*="delete"], [class*="remove"], .icon-close, .icon-delete'
+      ) as HTMLElement | null
+      if (anyClose) {
+        anyClose.style.cssText =
+          "display:flex !important; opacity:1 !important; visibility:visible !important; pointer-events:auto !important;"
+        anyClose.click()
+        return true
+      }
+
+      return false
+    }, IMG_PREVIEW)
+
+    if (!deleted) {
+      // Fallback: hover to reveal close button, then click
+      const firstPr = await page.$(IMG_PREVIEW)
+      if (!firstPr) break
+
+      const box = await firstPr.boundingBox()
+      if (box) {
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+        await delay(800)
+
+        const hoverDeleted = await page.evaluate((previewSel) => {
+          const el = document.querySelector(previewSel) as HTMLElement | null
+          if (!el) return false
+          const btn = el.querySelector(".close-btn") as HTMLElement | null
+          if (btn) {
+            btn.click()
+            return true
+          }
+          return false
+        }, IMG_PREVIEW)
+
+        if (!hoverDeleted) {
+          console.error(`[edit] WARNING: could not delete image ${i + 1}, skipping`)
+          continue
+        }
+      } else {
+        console.error(`[edit] WARNING: could not get bounding box for image ${i + 1}, skipping`)
+        continue
+      }
+    }
+
+    await delay(1500)
+    const remaining = await page.$$eval(IMG_PREVIEW, (els) => els.length)
+    console.error(`[edit] images remaining: ${remaining}`)
+  }
+
+  const finalCount = await page.$$eval(IMG_PREVIEW, (els) => els.length)
+  console.error(`[edit] deletion done, remaining: ${finalCount}`)
+}
+
+async function editClearAndFillTitle(page: Page, title: string): Promise<void> {
+  const titleInput = await page.$(TITLE_INPUT)
+  if (!titleInput) throw new Error("Title input not found")
+
+  // Clear the title completely using JS
+  await page.evaluate((sel) => {
+    const input = document.querySelector(sel) as HTMLInputElement | null
+    if (input) {
+      input.focus()
+      input.value = ""
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+    }
+  }, TITLE_INPUT)
+  await delay(300)
+
+  // Also use keyboard to make sure it's cleared
+  await titleInput.click()
+  await page.keyboard.down("Meta")
+  await page.keyboard.press("a")
+  await page.keyboard.up("Meta")
+  await delay(100)
+  await page.keyboard.press("Backspace")
+  await delay(300)
+
+  // Type the new title
+  await titleInput.type(title, { delay: 30 })
+  await delay(500)
+
+  const tooLong = await page.$(TITLE_MAX_SUFFIX)
+  if (tooLong) {
+    throw new Error("Title exceeds maximum length")
+  }
+}
+
+async function editClearAndFillContent(page: Page, content: string): Promise<void> {
+  const editor = await page.$(CONTENT_EDITOR)
+  if (!editor) throw new Error("Content editor not found")
+
+  // Strategy: clear all content in the editor using innerHTML, then type new content
+  await page.evaluate((sel) => {
+    const el = document.querySelector(sel) as HTMLElement | null
+    if (el) {
+      el.innerHTML = "<p><br></p>"
+      el.focus()
+    }
+  }, CONTENT_EDITOR)
+  await delay(500)
+
+  // Click to make sure cursor is in the editor
+  await editor.click()
+  await delay(200)
+
+  // Type the new content
+  await page.keyboard.type(content, { delay: 10 })
+  await delay(500)
+
+  const tooLong = await page.$(CONTENT_LENGTH_ERROR)
+  if (tooLong) {
+    throw new Error("Content exceeds maximum length")
+  }
+}
+
+async function editFillTags(page: Page, tags: string[]): Promise<void> {
+  const editor = await page.$(CONTENT_EDITOR)
+  if (!editor) throw new Error("Content editor not found for tags")
+
+  // Move cursor to end of content
+  await editor.click()
+  await page.keyboard.down("Meta")
+  await page.keyboard.press("End")
+  await page.keyboard.up("Meta")
+  await delay(100)
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press("ArrowDown")
+  }
+  await page.keyboard.press("Enter")
+  await page.keyboard.press("Enter")
+  await delay(300)
+
+  for (const tag of tags.slice(0, 10)) {
+    await page.keyboard.type(`#${tag}`, { delay: 30 })
+    await delay(1000)
+
+    try {
+      await page.waitForSelector(`${TOPIC_CONTAINER} ${TOPIC_ITEM}`, {
+        timeout: 5000,
+      })
+      const item = await page.$(`${TOPIC_CONTAINER} ${TOPIC_ITEM}`)
+      if (item) {
+        await item.click()
+      }
+    } catch {
+      // Topic suggestion didn't appear
+    }
+    await delay(500)
+  }
 }
 
 async function dismissPopover(page: Page): Promise<void> {
