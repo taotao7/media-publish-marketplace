@@ -18,6 +18,7 @@ export interface NoteInfo {
   readonly shares: number
   readonly sticky: boolean
   readonly coverUrl: string
+  readonly scheduledAt: string | null
 }
 
 // ── list notes ──────────────────────────────────────────────────────
@@ -139,6 +140,9 @@ function mapNotes(notes: any[]): NoteInfo[] {
     shares: note.shared_count || 0,
     sticky: note.sticky || false,
     coverUrl: note.images_list?.[0]?.url || "",
+    scheduledAt: note.schedule_post_time
+      ? new Date(note.schedule_post_time).toISOString()
+      : null,
   }))
 }
 

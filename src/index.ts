@@ -164,7 +164,7 @@ server.tool(
 
 server.tool(
   "list_notes",
-  "List published notes from the Xiaohongshu creator platform. Returns note IDs, titles, stats, etc.",
+  "List the default page of notes shown in the Xiaohongshu creator note manager (one page at a time). Use list_all_notes to retrieve every note across all pages.",
   {
     account: accountParam,
     page: z
@@ -189,7 +189,8 @@ server.tool(
         (n, i) =>
           `${i + 1}. [${n.id}] ${n.title}\n` +
           `   ${n.time} | views: ${n.views} likes: ${n.likes} collects: ${n.collects} comments: ${n.comments} shares: ${n.shares}` +
-          (n.sticky ? " [置顶]" : ""),
+          (n.sticky ? " [置顶]" : "") +
+          (n.scheduledAt ? `\n   [定时发布: ${n.scheduledAt}]` : ""),
       )
 
       return {
@@ -212,7 +213,7 @@ server.tool(
 
 server.tool(
   "list_all_notes",
-  "List ALL published notes from the Xiaohongshu creator platform, automatically handling pagination. Returns all note IDs, titles, stats, etc.",
+  "List ALL notes from the current Xiaohongshu account, automatically paginating through all pages. Returns every note's ID, title, stats, and scheduled publish time if applicable.",
   {
     account: accountParam,
   },
@@ -233,7 +234,8 @@ server.tool(
         (n, i) =>
           `${i + 1}. [${n.id}] ${n.title}\n` +
           `   ${n.time} | views: ${n.views} likes: ${n.likes} collects: ${n.collects} comments: ${n.comments} shares: ${n.shares}` +
-          (n.sticky ? " [置顶]" : ""),
+          (n.sticky ? " [置顶]" : "") +
+          (n.scheduledAt ? `\n   [定时发布: ${n.scheduledAt}]` : ""),
       )
 
       return {
