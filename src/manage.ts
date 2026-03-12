@@ -92,17 +92,17 @@ export async function listAllNotes(page: Page): Promise<NoteInfo[]> {
 
   let nextPage = firstResponse?.data?.page ?? -1
 
-  // Paginate: click next page buttons to trigger subsequent API calls
+  // Paginate: scroll the .content container to trigger infinite scroll loading
   while (nextPage !== -1) {
     const prevCount = collectedResponses.length
 
-    // Try to click pagination controls
-    const clicked = await clickNextPage(page, nextPage)
-
-    if (!clicked) {
-      // Fallback: scroll to bottom for infinite scroll
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-    }
+    // Scroll the .content container to its bottom
+    await page.evaluate(() => {
+      const container = document.querySelector(".content")
+      if (container) {
+        container.scrollTo(0, container.scrollHeight)
+      }
+    })
 
     // Wait for the next API response
     const deadline = Date.now() + 15_000
@@ -124,35 +124,6 @@ export async function listAllNotes(page: Page): Promise<NoteInfo[]> {
 
   page.off("response", responseHandler)
   return allNotes
-}
-
-async function clickNextPage(page: Page, targetPage: number): Promise<boolean> {
-  return page.evaluate((target: number) => {
-    // Try common pagination selectors
-    const nextBtns = document.querySelectorAll(
-      '.d-pager .d-pager-next, .el-pagination .btn-next, [class*="pagination"] [class*="next"], [class*="pager"] button'
-    )
-    for (const btn of nextBtns) {
-      if (!(btn as HTMLButtonElement).disabled) {
-        ;(btn as HTMLElement).click()
-        return true
-      }
-    }
-
-    // Try clicking a specific page number
-    const pageLinks = document.querySelectorAll(
-      '.d-pager li, [class*="pagination"] li, [class*="pager"] a'
-    )
-    for (const link of pageLinks) {
-      const text = (link.textContent || "").trim()
-      if (text === String(target + 1)) {
-        ;(link as HTMLElement).click()
-        return true
-      }
-    }
-
-    return false
-  }, targetPage)
 }
 
 function mapNotes(notes: any[]): NoteInfo[] {
