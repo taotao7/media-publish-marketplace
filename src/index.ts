@@ -7,7 +7,7 @@ import { launchBrowser } from "./browser.js"
 import { deleteCookies, getCookiePath, listAccounts } from "./cookies.js"
 import { checkLoginStatus, fetchQrcode, waitForLogin } from "./login.js"
 import { publishContent } from "./publish.js"
-import { listNotes, deleteNote, getEditUrl } from "./manage.js"
+import { listNotes, listAllNotes, deleteNote, getEditUrl } from "./manage.js"
 import { qrcodeToCleanPng } from "./qrcode.js"
 import { uploadToR2 } from "./r2.js"
 
@@ -202,6 +202,50 @@ server.tool(
       }
     } catch (error) {
       return errorResult(`List notes failed: ${String(error)}`)
+    } finally {
+      await managed.close()
+    }
+  },
+)
+
+// ── list_all_notes ──────────────────────────────────────────────────
+
+server.tool(
+  "list_all_notes",
+  "List ALL published notes from the Xiaohongshu creator platform, automatically handling pagination. Returns all note IDs, titles, stats, etc.",
+  {
+    account: accountParam,
+  },
+  async ({ account }): Promise<CallToolResult> => {
+    const acct = account || DEFAULT_ACCOUNT
+    const managed = await launchBrowser(acct)
+    try {
+      const notes = await listAllNotes(managed.page)
+      await managed.saveCookies()
+
+      if (notes.length === 0) {
+        return {
+          content: [{ type: "text", text: `No notes found (account: ${acct}).` }],
+        }
+      }
+
+      const lines = notes.map(
+        (n, i) =>
+          `${i + 1}. [${n.id}] ${n.title}\n` +
+          `   ${n.time} | views: ${n.views} likes: ${n.likes} collects: ${n.collects} comments: ${n.comments} shares: ${n.shares}` +
+          (n.sticky ? " [置顶]" : ""),
+      )
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `All notes for account '${acct}' (${notes.length} total):\n\n${lines.join("\n\n")}`,
+          },
+        ],
+      }
+    } catch (error) {
+      return errorResult(`List all notes failed: ${String(error)}`)
     } finally {
       await managed.close()
     }

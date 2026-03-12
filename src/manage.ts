@@ -4,6 +4,7 @@ import { NOTE_DELETE_BTN } from "./selectors.js"
 const NOTE_MANAGER_URL = "https://creator.xiaohongshu.com/new/note-manager"
 const UPDATE_URL = "https://creator.xiaohongshu.com/publish/update"
 const NOTE_API_PATTERN = "/creator/note/user/posted"
+const NOTE_API_V2 = "/api/galaxy/v2/creator/note/user/posted"
 
 export interface NoteInfo {
   readonly id: string
@@ -51,7 +52,111 @@ export async function listNotes(
     return []
   }
 
-  return response.data.notes.map((note: any) => ({
+  return mapNotes(response.data.notes)
+}
+
+// ── list all notes (with pagination) ────────────────────────────────
+
+export async function listAllNotes(page: Page): Promise<NoteInfo[]> {
+  const allNotes: NoteInfo[] = []
+
+  // Intercept ALL matching API responses (across pages)
+  const collectedResponses: any[] = []
+  const responseHandler = async (resp: any) => {
+    if (resp.url().includes(NOTE_API_V2)) {
+      try {
+        const body = await resp.json()
+        collectedResponses.push(body)
+      } catch {}
+    }
+  }
+  page.on("response", responseHandler)
+
+  // Navigate to note manager — this triggers the first API call (page=0)
+  await page.goto(NOTE_MANAGER_URL, { waitUntil: "networkidle2", timeout: 30_000 })
+  await delay(3000)
+  assertNotLogin(page)
+
+  // Wait a bit for the first response to be captured
+  await delay(2000)
+
+  if (collectedResponses.length === 0) {
+    page.off("response", responseHandler)
+    return []
+  }
+
+  const firstResponse = collectedResponses[0]
+  if (firstResponse?.data?.notes) {
+    allNotes.push(...mapNotes(firstResponse.data.notes))
+  }
+
+  let nextPage = firstResponse?.data?.page ?? -1
+
+  // Paginate: click next page buttons to trigger subsequent API calls
+  while (nextPage !== -1) {
+    const prevCount = collectedResponses.length
+
+    // Try to click pagination controls
+    const clicked = await clickNextPage(page, nextPage)
+
+    if (!clicked) {
+      // Fallback: scroll to bottom for infinite scroll
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    }
+
+    // Wait for the next API response
+    const deadline = Date.now() + 15_000
+    while (collectedResponses.length === prevCount && Date.now() < deadline) {
+      await delay(500)
+    }
+
+    if (collectedResponses.length === prevCount) {
+      // No new response received, stop
+      break
+    }
+
+    const latestResponse = collectedResponses[collectedResponses.length - 1]
+    if (latestResponse?.data?.notes) {
+      allNotes.push(...mapNotes(latestResponse.data.notes))
+    }
+    nextPage = latestResponse?.data?.page ?? -1
+  }
+
+  page.off("response", responseHandler)
+  return allNotes
+}
+
+async function clickNextPage(page: Page, targetPage: number): Promise<boolean> {
+  return page.evaluate((target: number) => {
+    // Try common pagination selectors
+    const nextBtns = document.querySelectorAll(
+      '.d-pager .d-pager-next, .el-pagination .btn-next, [class*="pagination"] [class*="next"], [class*="pager"] button'
+    )
+    for (const btn of nextBtns) {
+      if (!(btn as HTMLButtonElement).disabled) {
+        ;(btn as HTMLElement).click()
+        return true
+      }
+    }
+
+    // Try clicking a specific page number
+    const pageLinks = document.querySelectorAll(
+      '.d-pager li, [class*="pagination"] li, [class*="pager"] a'
+    )
+    for (const link of pageLinks) {
+      const text = (link.textContent || "").trim()
+      if (text === String(target + 1)) {
+        ;(link as HTMLElement).click()
+        return true
+      }
+    }
+
+    return false
+  }, targetPage)
+}
+
+function mapNotes(notes: any[]): NoteInfo[] {
+  return notes.map((note: any) => ({
     id: note.id,
     title: note.display_title || "",
     time: note.time || "",
