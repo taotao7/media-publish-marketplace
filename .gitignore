@@ -7,3 +7,4 @@ dist/
 output/
 *.png
 .aider*
+.aider.chat.history.md
