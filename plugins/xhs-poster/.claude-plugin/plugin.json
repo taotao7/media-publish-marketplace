@@ -1,0 +1,11 @@
+{
+  "name": "xhs-poster",
+  "description": "Publish and manage Xiaohongshu (小红书) posts via browser automation. Supports QR code login, image posting, scheduling, editing, deletion, and multi-account management.",
+  "version": "0.1.0",
+  "mcpServers": {
+    "xhs-poster": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/src/index.ts"]
+    }
+  }
+}

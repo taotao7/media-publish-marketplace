@@ -1,100 +1,53 @@
-# mcp-xhs-poster
+# media-publish-marketplace
 
-小红书 MCP Server —— 通过 MCP 协议实现小红书的登录、发布图文笔记、管理会话。
+Claude Code plugin marketplace for media publishing tools — 社交媒体发布工具集。
 
-基于 Puppeteer 浏览器自动化，支持扫码登录、图片上传、话题标签、定时发布、附件上传、R2 图床等功能。
+## Install
 
-## 功能
+```shell
+/plugin marketplace add taotao7/media-publish-marketplace
+/plugin install xhs-poster@media-publish-marketplace
+```
 
-| 工具 | 说明 |
-|------|------|
-| `check_login_status` | 检查当前 Cookie 是否为有效的登录状态 |
+## Plugins
+
+### xhs-poster
+
+小红书 MCP Server — 通过 MCP 协议实现小红书的登录、发布图文笔记、管理笔记。
+
+基于 Puppeteer 浏览器自动化，支持扫码登录、多账号管理、图片上传、话题标签、定时发布、编辑、删除、R2 图床等功能。
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `check_login_status` | 检查 Cookie 是否为有效登录状态 |
 | `get_login_qrcode` | 生成登录二维码，等待扫码（最长 4 分钟） |
-| `publish_content` | 发布图文笔记（支持标题、正文、图片、标签、定时、附件） |
-| `upload_image` | 上传本地图片到 Cloudflare R2，返回公开 URL |
-| `delete_cookies` | 删除已保存的 Cookie，重置登录状态 |
+| `list_accounts` | 列出所有已保存的账号 |
+| `list_notes` | 列出笔记（分页） |
+| `list_all_notes` | 列出所有笔记（自动翻页） |
+| `publish_content` | 发布图文笔记（支持定时、附件） |
+| `edit_note` | 编辑已发布笔记 |
+| `delete_note` | 删除笔记 |
+| `upload_image` | 上传图片到 Cloudflare R2，返回公开 URL |
+| `delete_cookies` | 删除已保存 Cookie，重置登录状态 |
 
-## 安装
+**Required env vars:**
 
-```bash
-bun install
-```
-
-需要安装 [Bun](https://bun.sh) 运行时。
-
-## 配置
-
-在 MCP 客户端（如 Claude Desktop）中添加：
-
-```json
-{
-  "mcpServers": {
-    "xhs-poster": {
-      "command": "bun",
-      "args": ["run", "/path/to/mcp-xhs-poster/src/index.ts"],
-      "env": {
-        "XHS_HEADLESS": "true",
-        "XHS_COOKIES_PATH": "~/.media-mcp/xhs-cookies.json",
-        "R2_ACCOUNT_ID": "your-account-id",
-        "R2_ACCESS_KEY_ID": "your-access-key",
-        "R2_SECRET_ACCESS_KEY": "your-secret-key",
-        "R2_BUCKET_NAME": "your-bucket",
-        "R2_PUBLIC_URL": "https://img.example.com"
-      }
-    }
-  }
-}
-```
-
-### 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `XHS_HEADLESS` | `true` | 设为 `false` 可显示浏览器窗口（调试用） |
-| `XHS_COOKIES_PATH` | `~/.media-mcp/xhs-cookies.json` | Cookie 存储路径 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `XHS_HEADLESS` | `true` | `false` 可显示浏览器窗口（调试用） |
+| `XHS_COOKIES_PATH` | `~/.media-mcp/` | Cookie 存储路径 |
 | `R2_ACCOUNT_ID` | — | Cloudflare 账户 ID |
 | `R2_ACCESS_KEY_ID` | — | R2 API Token Access Key |
 | `R2_SECRET_ACCESS_KEY` | — | R2 API Token Secret Key |
 | `R2_BUCKET_NAME` | — | R2 存储桶名称 |
-| `R2_PUBLIC_URL` | — | R2 存储桶的公开访问域名（如 `https://img.example.com`） |
+| `R2_PUBLIC_URL` | — | R2 公开访问域名（如 `https://img.example.com`） |
 
-## 使用流程
+Requires [Bun](https://bun.sh) runtime.
 
-1. 调用 `check_login_status` 检查是否已登录
-2. 未登录则调用 `get_login_qrcode`，用小红书 App 扫码
-3. 登录成功后调用 `publish_content` 发布笔记
+## Adding more plugins
 
-### publish_content 参数
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `title` | string | 是 | 笔记标题 |
-| `content` | string | 是 | 笔记正文 |
-| `images` | string[] | 是 | 图片文件绝对路径（至少 1 张） |
-| `tags` | string[] | 否 | 话题标签（最多 10 个） |
-| `schedule_at` | string | 否 | 定时发布时间，ISO 8601 格式（1 小时 ~ 14 天内），页面输入格式为 `YYYY-MM-DD HH:mm` |
-| `attachments` | string[] | 否 | 附件文件绝对路径 |
-
-### 定时发布
-
-传入 `schedule_at` 参数即可定时发布。工具会自动打开定时开关，将 ISO 8601 时间转为 `YYYY-MM-DD HH:mm` 格式填入日期选择器，然后点击发布。发布后笔记会出现在创作者中心的「定时发布」列表中。
-
-> 注意：定时时间必须在 1 小时 ~ 14 天之间，超出范围会报错。
-
-### 图片上传（R2 图床）
-
-调用 `upload_image` 将本地图片上传到 Cloudflare R2 对象存储，返回公开 URL。适用于 Markdown 内容中需要引用网络图片的场景 — 先上传获取 URL，再嵌入到内容中。
-
-需要配置 R2 相关的环境变量（见上方环境变量表）。
-
-## 技术栈
-
-- TypeScript + Bun
-- Puppeteer + Stealth Plugin（反检测）
-- MCP SDK (`@modelcontextprotocol/sdk`)
-- Zod（参数校验）
-- AWS SDK S3（Cloudflare R2 兼容）
-
-## License
-
-MIT
+1. Create `plugins/<name>/` with source code
+2. Add `plugins/<name>/.claude-plugin/plugin.json`
+3. Register in `.claude-plugin/marketplace.json`

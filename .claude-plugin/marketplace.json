@@ -1,0 +1,16 @@
+{
+  "name": "media-publish-marketplace",
+  "owner": {
+    "name": "tao"
+  },
+  "metadata": {
+    "description": "Media publishing tools for Claude Code — social platforms and more"
+  },
+  "plugins": [
+    {
+      "name": "xhs-poster",
+      "source": "./plugins/xhs-poster",
+      "description": "Publish and manage Xiaohongshu (小红书) posts via browser automation"
+    }
+  ]
+}
