@@ -7,6 +7,7 @@ Claude Code plugin marketplace for media publishing tools — 社交媒体发布
 ```shell
 /plugin marketplace add taotao7/media-publish-marketplace
 /plugin install xhs-poster@media-publish-marketplace
+/plugin install douyin-poster@media-publish-marketplace
 ```
 
 ## Plugins
@@ -45,6 +46,30 @@ Claude Code plugin marketplace for media publishing tools — 社交媒体发布
 | `R2_PUBLIC_URL` | — | R2 公开访问域名（如 `https://img.example.com`） |
 
 Requires [Bun](https://bun.sh) runtime.
+
+### douyin-poster
+
+抖音 MCP Server — 通过 MCP 协议实现抖音创作者平台登录与视频发布。
+
+基于 Puppeteer 浏览器自动化，支持扫码登录、多账号 Cookie 管理、视频上传、标题/简介填写、标签和可见性设置。
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `check_login_status` | 检查 Cookie 是否为有效登录状态 |
+| `get_login_qrcode` | 生成登录二维码，等待扫码（最长 4 分钟） |
+| `list_accounts` | 列出所有已保存的账号 |
+| `publish_video` | 发布视频，支持标题、简介、标签和私密可见 |
+| `delete_cookies` | 删除已保存 Cookie，重置登录状态 |
+
+**Recommended env vars:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOUYIN_HEADLESS` | `true` | `false` 可显示浏览器窗口（调试用） |
+| `DOUYIN_COOKIES_PATH` | `~/.media-mcp/douyin/` | 抖音账号 Cookie 存储根目录 |
+| `PUPPETEER_EXECUTABLE_PATH` | auto-detect | 指定本地 Chrome/Chromium 可执行文件路径 |
 
 ## Adding more plugins
 

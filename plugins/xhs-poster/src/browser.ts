@@ -15,7 +15,7 @@ export async function launchBrowser(account: string): Promise<ManagedBrowser> {
   const headless = process.env.XHS_HEADLESS !== "false";
 
   const browser: Browser = (await puppeteer.launch({
-    headless: headless ? "new" : false,
+    headless,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   })) as Browser;
 

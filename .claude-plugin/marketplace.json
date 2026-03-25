@@ -11,6 +11,11 @@
       "name": "xhs-poster",
       "source": "./plugins/xhs-poster",
       "description": "Publish and manage Xiaohongshu (小红书) posts via browser automation"
+    },
+    {
+      "name": "douyin-poster",
+      "source": "./plugins/douyin-poster",
+      "description": "Publish Douyin (抖音) videos via browser automation"
     }
   ]
 }

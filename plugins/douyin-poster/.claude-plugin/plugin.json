@@ -1,0 +1,11 @@
+{
+  "name": "douyin-poster",
+  "description": "Publish Douyin videos via browser automation. Supports QR code login, multi-account cookie storage, and video publishing.",
+  "version": "0.1.0",
+  "mcpServers": {
+    "douyin-poster": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/src/index.ts"]
+    }
+  }
+}
