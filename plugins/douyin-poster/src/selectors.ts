@@ -13,13 +13,32 @@ export const PUBLISH_READY_TEXTS = [
 export const LOGIN_QRCODE_SELECTORS = [
   "img[class*='qrcode_img']",
   "[class*='qrcode'] img",
-  "img[src^='data:image/png;base64,']",
 ] as const
 
 export const LOGIN_PHONE_INPUT_SELECTORS = [
   "input[placeholder='请输入手机号']",
   "input[type='tel'][placeholder*='手机号']",
 ] as const
+
+export const IMAGE_TAB_SELECTOR = "div.tab-container-DjaX1b > div:nth-child(2)" as const
+export const IMAGE_TAB_TEXTS = ["上传图文", "图文"] as const
+
+export const IMAGE_FILE_INPUT_SELECTORS = [
+  "input[type='file'][accept*='image']",
+  "input[type='file']",
+] as const
+
+// After image upload the thumbnail uses CSS background-image, not <img src>
+export const IMAGE_UPLOADED_INDICATOR_SELECTOR =
+  "[style*='creator-media-private.douyin.com']" as const
+
+export const ADD_MORE_IMAGES_TEXTS = ["继续添加"] as const
+export const ADD_MORE_IMAGES_BUTTON_SELECTOR = "button[class*='continue-add']" as const
+export const MUSIC_SELECT_TEXTS = ["选择音乐"] as const
+export const MUSIC_PICKER_SELECTOR = "[class*='music-side-sheet']" as const
+
+export const SCHEDULE_RADIO_TEXT = "定时发布" as const
+export const SCHEDULE_INPUT_SELECTOR = "input[placeholder='日期和时间']" as const
 
 export const FILE_INPUT_SELECTORS = [
   "input[type='file'][accept*='video']",
@@ -49,6 +68,7 @@ export const TAG_INPUT_SELECTORS = [
 ] as const
 
 export const PUBLISH_BUTTON_SELECTORS = [
+  "button[class*='primary'][class*='fixed']",
   "button[class*='publish']",
   "button[class*='submit']",
   "[role='button'][class*='publish']",

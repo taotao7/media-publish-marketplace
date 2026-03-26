@@ -51,7 +51,9 @@ export async function detectLoginStatus(page: Page): Promise<LoginStatus> {
   }
 
   return {
-    loggedIn: lastSignals.hasPublishPrompt && !lastSignals.hasLoginPrompt,
+    // Only consider not logged in when there's an explicit login prompt.
+    // Absence of publish signals (e.g. page still loading) is NOT a login failure.
+    loggedIn: !lastSignals.hasLoginPrompt,
     currentUrl: page.url(),
   }
 }
@@ -67,19 +69,14 @@ export async function fetchQrcode(
   }
 
   await switchToQrcodeLogin(page)
-  const qrcode = await waitForQrcode(page)
-  const imgSrc = await qrcode.evaluate((el) => el.getAttribute("src"))
+  const imgSrc = await waitForQrcodeSrc(page)
 
   const qrcodeDir = join(homedir(), ".media-mcp", "douyin")
   mkdirSync(qrcodeDir, { recursive: true })
   const qrcodePath = join(qrcodeDir, `qrcode-${account}.png`)
 
-  if (imgSrc?.startsWith("data:image/")) {
-    const base64Data = imgSrc.replace(/^data:image\/\w+;base64,/, "")
-    writeFileSync(qrcodePath, Buffer.from(base64Data, "base64"))
-  } else {
-    await qrcode.screenshot({ path: qrcodePath })
-  }
+  const base64Data = imgSrc.replace(/^data:image\/\w+;base64,/, "")
+  writeFileSync(qrcodePath, Buffer.from(base64Data, "base64"))
 
   return {
     alreadyLoggedIn: false,
@@ -113,32 +110,37 @@ async function openCreatorUpload(page: Page): Promise<void> {
 }
 
 async function inspectAuthSignals(page: Page): Promise<AuthSignals> {
-  const hasLoginSelector =
-    (await selectorExists(page, LOGIN_QRCODE_SELECTORS)) ||
-    (await selectorExists(page, LOGIN_PHONE_INPUT_SELECTORS))
+  try {
+    const hasLoginSelector =
+      (await selectorExists(page, LOGIN_QRCODE_SELECTORS)) ||
+      (await selectorExists(page, LOGIN_PHONE_INPUT_SELECTORS))
 
-  const hasPublishSelector =
-    (await selectorExists(page, FILE_INPUT_SELECTORS)) ||
-    (await selectorExists(page, TITLE_INPUT_SELECTORS)) ||
-    (await selectorExists(page, PUBLISH_BUTTON_SELECTORS))
+    const hasPublishSelector =
+      (await selectorExists(page, FILE_INPUT_SELECTORS)) ||
+      (await selectorExists(page, TITLE_INPUT_SELECTORS)) ||
+      (await selectorExists(page, PUBLISH_BUTTON_SELECTORS))
 
-  const textSignals = await page.evaluate(
-    ({ loginTexts, publishReadyTexts }) => {
-      const text = document.body.innerText.replace(/\s+/g, " ")
-      return {
-        hasLoginText: loginTexts.some((item) => text.includes(item)),
-        hasPublishText: publishReadyTexts.some((item) => text.includes(item)),
-      }
-    },
-    {
-      loginTexts: [...LOGIN_TEXTS],
-      publishReadyTexts: [...PUBLISH_READY_TEXTS],
-    },
-  )
+    const textSignals = await page.evaluate(
+      ({ loginTexts, publishReadyTexts }) => {
+        const text = document.body.innerText.replace(/\s+/g, " ")
+        return {
+          hasLoginText: loginTexts.some((item) => text.includes(item)),
+          hasPublishText: publishReadyTexts.some((item) => text.includes(item)),
+        }
+      },
+      {
+        loginTexts: [...LOGIN_TEXTS],
+        publishReadyTexts: [...PUBLISH_READY_TEXTS],
+      },
+    )
 
-  return {
-    hasLoginPrompt: hasLoginSelector || textSignals.hasLoginText,
-    hasPublishPrompt: hasPublishSelector || textSignals.hasPublishText,
+    return {
+      hasLoginPrompt: hasLoginSelector || textSignals.hasLoginText,
+      hasPublishPrompt: hasPublishSelector || textSignals.hasPublishText,
+    }
+  } catch {
+    // Page navigated during evaluation — treat as transitioning, no definitive signal
+    return { hasLoginPrompt: false, hasPublishPrompt: false }
   }
 }
 
@@ -168,18 +170,33 @@ async function switchToQrcodeLogin(page: Page): Promise<void> {
   }
 }
 
-async function waitForQrcode(page: Page): Promise<ElementHandle<Element>> {
-  const deadline = Date.now() + 15_000
+async function waitForQrcodeSrc(page: Page): Promise<string> {
+  const deadline = Date.now() + 30_000
 
   while (Date.now() < deadline) {
-    const qrcode = await firstExistingSelector(page, LOGIN_QRCODE_SELECTORS)
-    if (qrcode) {
-      const handle = await page.$(qrcode)
-      if (handle) {
-        return handle
+    const src = await page.evaluate((selectors) => {
+      // Try class-based selectors first
+      for (const sel of selectors) {
+        const img = document.querySelector(sel) as HTMLImageElement | null
+        if (img?.src && img.naturalWidth >= 100 && img.naturalHeight >= 100) {
+          return img.src
+        }
       }
-    }
-    await delay(300)
+      // Fallback: any large base64 PNG
+      for (const img of Array.from(document.querySelectorAll("img")) as HTMLImageElement[]) {
+        if (
+          img.src.startsWith("data:image/") &&
+          img.naturalWidth >= 100 &&
+          img.naturalHeight >= 100
+        ) {
+          return img.src
+        }
+      }
+      return null
+    }, [...LOGIN_QRCODE_SELECTORS])
+
+    if (src) return src
+    await delay(500)
   }
 
   throw new Error("Douyin QR code not found")

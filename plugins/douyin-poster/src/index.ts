@@ -3,7 +3,7 @@ import type { CallToolResult } from "./mcp.js"
 import { launchBrowser } from "./browser.js"
 import { deleteCookies, getCookiePath, listAccounts } from "./cookies.js"
 import { checkLoginStatus, fetchQrcode, waitForLogin } from "./login.js"
-import { publishVideo } from "./publish.js"
+import { publishVideo, publishImages } from "./publish.js"
 
 const DEFAULT_ACCOUNT = "default"
 
@@ -158,6 +158,10 @@ server.tool(
       .enum(["public", "private"])
       .optional()
       .describe("Visibility of the published video. Defaults to public."),
+    schedule_at: z
+      .string()
+      .optional()
+      .describe("ISO 8601 datetime to schedule the post (e.g. 2026-04-01T18:00:00). Must be in the future. If omitted, publishes immediately."),
   },
   async ({
     account,
@@ -166,6 +170,7 @@ server.tool(
     video_path,
     tags,
     visibility,
+    schedule_at,
   }): Promise<CallToolResult> => {
     const acct = account || DEFAULT_ACCOUNT
     const managed = await launchBrowser(acct)
@@ -177,6 +182,7 @@ server.tool(
         videoPath: video_path,
         tags,
         visibility,
+        scheduleAt: schedule_at,
       })
       await managed.saveCookies()
 
@@ -184,12 +190,72 @@ server.tool(
         content: [
           {
             type: "text",
-            text: `Douyin video submitted successfully (account: ${acct}).`,
+            text: schedule_at
+              ? `Douyin video scheduled for ${schedule_at} (account: ${acct}).`
+              : `Douyin video submitted successfully (account: ${acct}).`,
           },
         ],
       }
     } catch (error) {
       return errorResult(`Publish failed: ${String(error)}`)
+    } finally {
+      await managed.close()
+    }
+  },
+)
+
+server.tool(
+  "publish_images",
+  "Publish an image post (图文) to Douyin creator platform. Requires prior login and local image file paths.",
+  {
+    account: accountParam,
+    title: z.string().describe("Post title"),
+    content: z.string().optional().describe("Post description or intro text"),
+    image_paths: z
+      .array(z.string())
+      .min(1)
+      .describe("Absolute paths to local image files to upload (at least one)"),
+    tags: z
+      .array(z.string())
+      .max(5)
+      .optional()
+      .describe("Tags or topics to attach (max 5)"),
+    visibility: z
+      .enum(["public", "private"])
+      .optional()
+      .describe("Visibility of the published post. Defaults to public."),
+    schedule_at: z
+      .string()
+      .optional()
+      .describe("ISO 8601 datetime to schedule the post (e.g. 2026-04-01T18:00:00). Must be in the future. If omitted, publishes immediately."),
+  },
+  async ({ account, title, content, image_paths, tags, visibility, schedule_at }): Promise<CallToolResult> => {
+    const acct = account || DEFAULT_ACCOUNT
+    const managed = await launchBrowser(acct)
+
+    try {
+      await publishImages(managed.page, {
+        title,
+        content,
+        imagePaths: image_paths,
+        tags,
+        visibility,
+        scheduleAt: schedule_at,
+      })
+      await managed.saveCookies()
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: schedule_at
+              ? `Douyin image post scheduled for ${schedule_at} (account: ${acct}, images: ${image_paths.length}).`
+              : `Douyin image post submitted successfully (account: ${acct}, images: ${image_paths.length}).`,
+          },
+        ],
+      }
+    } catch (error) {
+      return errorResult(`Publish images failed: ${String(error)}`)
     } finally {
       await managed.close()
     }
