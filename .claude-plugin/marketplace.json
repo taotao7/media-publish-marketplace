@@ -10,12 +10,14 @@
     {
       "name": "xhs-poster",
       "source": "./plugins/xhs-poster",
-      "description": "Publish and manage Xiaohongshu (小红书) posts via browser automation"
+      "description": "Publish and manage Xiaohongshu (小红书) posts via browser automation",
+      "skills": ["./skills/setup-xhs-poster"]
     },
     {
       "name": "douyin-poster",
       "source": "./plugins/douyin-poster",
-      "description": "Publish Douyin (抖音) videos via browser automation"
+      "description": "Publish Douyin (抖音) videos via browser automation",
+      "skills": ["./skills/setup-douyin-poster"]
     }
   ]
 }
