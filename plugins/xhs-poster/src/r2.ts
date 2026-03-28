@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs"
 import { basename, extname } from "node:path"
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 
 const MIME_MAP: Record<string, string> = {
   ".png": "image/png",
@@ -19,7 +18,8 @@ function getEnv(name: string): string {
   return val
 }
 
-function createR2Client(): S3Client {
+async function createR2Client() {
+  const { S3Client } = await import("@aws-sdk/client-s3")
   const accountId = getEnv("R2_ACCOUNT_ID")
   return new S3Client({
     region: "auto",
@@ -43,7 +43,8 @@ export async function uploadToR2(filePath: string): Promise<string> {
 
   const body = readFileSync(filePath)
 
-  const client = createR2Client()
+  const { PutObjectCommand } = await import("@aws-sdk/client-s3")
+  const client = await createR2Client()
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,

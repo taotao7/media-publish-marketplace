@@ -5,7 +5,7 @@
   "mcpServers": {
     "xhs-poster": {
       "command": "bun",
-      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/src/index.ts"]
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/start.ts"]
     }
   }
 }
