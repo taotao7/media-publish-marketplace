@@ -16,7 +16,6 @@ import {
   PROGRESS_SELECTORS,
   SCHEDULE_INPUT_SELECTOR,
   SCHEDULE_RADIO_TEXT,
-  TAG_INPUT_SELECTORS,
   TITLE_INPUT_SELECTORS,
 } from "./selectors.js"
 
@@ -94,17 +93,14 @@ export async function publishVideo(
 
   await fillTextField(page, TITLE_INPUT_SELECTORS, params.title.slice(0, MAX_TITLE_LENGTH))
 
-  if (params.content && params.content.trim()) {
+  const descriptionWithTags = buildDescriptionWithTags(params.content, params.tags)
+  if (descriptionWithTags) {
     await fillTextField(
       page,
       DESCRIPTION_INPUT_SELECTORS,
-      params.content.slice(0, MAX_CONTENT_LENGTH),
+      descriptionWithTags.slice(0, MAX_CONTENT_LENGTH),
       { optional: true },
     )
-  }
-
-  if ((params.tags?.length ?? 0) > 0) {
-    await addTags(page, params.tags ?? [])
   }
 
   if (params.visibility === "private") {
@@ -215,17 +211,14 @@ export async function publishImages(
 
   await fillTextField(page, TITLE_INPUT_SELECTORS, params.title.slice(0, MAX_TITLE_LENGTH))
 
-  if (params.content && params.content.trim()) {
+  const descriptionWithTags = buildDescriptionWithTags(params.content, params.tags)
+  if (descriptionWithTags) {
     await fillTextField(
       page,
       DESCRIPTION_INPUT_SELECTORS,
-      params.content.slice(0, MAX_CONTENT_LENGTH),
+      descriptionWithTags.slice(0, MAX_CONTENT_LENGTH),
       { optional: true },
     )
-  }
-
-  if ((params.tags?.length ?? 0) > 0) {
-    await addTags(page, params.tags ?? [])
   }
 
   if (params.visibility === "private") {
@@ -385,39 +378,26 @@ async function fillTextField(
   await page.keyboard.type(value, { delay: 20 })
 }
 
-async function addTags(page: Page, tags: readonly string[]): Promise<void> {
-  const cleanTags = tags
+function buildDescriptionWithTags(
+  content: string | undefined,
+  tags: readonly string[] | undefined,
+): string {
+  const parts: string[] = []
+
+  if (content && content.trim()) {
+    parts.push(content.trim())
+  }
+
+  const cleanTags = (tags ?? [])
     .map((tag) => tag.trim().replace(/^#/, ""))
     .filter(Boolean)
     .slice(0, 5)
 
-  if (cleanTags.length === 0) {
-    return
+  if (cleanTags.length > 0) {
+    parts.push(cleanTags.map((tag) => `#${tag}`).join(" ") + " ")
   }
 
-  const tagSelector = await firstExistingSelector(page, TAG_INPUT_SELECTORS)
-  if (tagSelector) {
-    for (const tag of cleanTags) {
-      await fillTextField(page, [tagSelector], tag, { optional: true })
-      await page.keyboard.press("Enter").catch(() => {})
-      await delay(600)
-    }
-    return
-  }
-
-  const descriptionSelector = await firstExistingSelector(
-    page,
-    DESCRIPTION_INPUT_SELECTORS,
-  )
-  if (!descriptionSelector) {
-    return
-  }
-
-  await page.focus(descriptionSelector).catch(() => {})
-  await page.keyboard.press("End").catch(() => {})
-  await page.keyboard.type(`\n${cleanTags.map((tag) => `#${tag}`).join(" ")}`, {
-    delay: 20,
-  })
+  return parts.join("\n")
 }
 
 async function clickPublishButton(page: Page): Promise<boolean> {

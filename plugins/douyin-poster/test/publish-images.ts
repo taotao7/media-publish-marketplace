@@ -15,16 +15,12 @@ const TEST_IMAGES = [
 const managed = await launchBrowser("default")
 
 try {
-// Schedule 10 minutes from now
-const scheduleAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
-
-await publishImages(managed.page, {
-    title: "测试图文定时发布",
-    content: "这是一条定时发送的测试图文，测试完成后可以删除。",
+  await publishImages(managed.page, {
+    title: "日常分享",
+    content: "分享一些工作日常",
     imagePaths: TEST_IMAGES,
-    tags: ["测试"],
+    tags: ["效率工具", "工作流", "生产力", "AI工具", "日常分享"],
     visibility: "private",
-    scheduleAt,
   })
   await managed.saveCookies()
   console.error("[test] image post published successfully")
