@@ -16,11 +16,19 @@
         "zod": "^3.24.2",
       },
     },
+    "plugins/r2-uploader": {
+      "name": "r2-uploader",
+      "version": "0.1.0",
+      "dependencies": {
+        "@aws-sdk/client-s3": "^3.1003.0",
+        "@modelcontextprotocol/sdk": "^1.12.1",
+        "zod": "^3.24.2",
+      },
+    },
     "plugins/xhs-poster": {
       "name": "xhs-poster",
       "version": "0.1.0",
       "dependencies": {
-        "@aws-sdk/client-s3": "^3.1003.0",
         "@modelcontextprotocol/sdk": "^1.12.1",
         "@types/pngjs": "^6.0.5",
         "@types/qrcode": "^1.5.6",
@@ -588,6 +596,8 @@
     "qrcode": ["qrcode@1.5.4", "", { "dependencies": { "dijkstrajs": "^1.0.1", "pngjs": "^5.0.0", "yargs": "^15.3.1" }, "bin": { "qrcode": "bin/qrcode" } }, "sha512-1ca71Zgiu6ORjHqFBDpnSMTR2ReToX4l1Au1VFLyVeBTFavzQnv5JxMFr3ukHVKpSrSA2MCk0lNJSykjUfz7Zg=="],
 
     "qs": ["qs@6.14.2", "", { "dependencies": { "side-channel": "^1.1.0" } }, "sha512-V/yCWTTF7VJ9hIh18Ugr2zhJMP01MY7c5kh4J870L7imm6/DIzBsNLTXzMwUA3yZ5b/KBqLx8Kp3uRvd7xSe3Q=="],
+
+    "r2-uploader": ["r2-uploader@workspace:plugins/r2-uploader"],
 
     "range-parser": ["range-parser@1.2.1", "", {}, "sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg=="],
 

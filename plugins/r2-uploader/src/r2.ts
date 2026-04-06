@@ -33,14 +33,11 @@ async function createR2Client() {
 
 export async function uploadToR2(filePath: string): Promise<string> {
   const bucket = getEnv("R2_BUCKET_NAME")
-  const publicUrl = getEnv("R2_PUBLIC_URL") // e.g. https://img.example.com
+  const publicUrl = getEnv("R2_PUBLIC_URL")
 
   const ext = extname(filePath).toLowerCase()
   const contentType = MIME_MAP[ext] ?? "application/octet-stream"
-
-  // Generate a unique key: timestamp-originalname
   const key = `${Date.now()}-${basename(filePath)}`
-
   const body = readFileSync(filePath)
 
   const { PutObjectCommand } = await import("@aws-sdk/client-s3")

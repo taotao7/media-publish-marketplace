@@ -7,15 +7,17 @@ Claude Code plugin marketplace for media publishing tools — 社交媒体发布
 ```shell
 /plugin marketplace add taotao7/media-publish-marketplace
 /plugin install xhs-poster@media-publish-marketplace
+/plugin install r2-uploader@media-publish-marketplace
 /plugin install douyin-poster@media-publish-marketplace
 ```
 
 ## Setup
 
-安装后首次使用，运行对应的 setup skill 完成初始化（安装依赖 + 扫码登录）：
+安装后首次使用，运行对应的 setup skill 完成初始化（安装依赖，并按插件完成登录或环境变量配置）：
 
 ```
 /xhs-poster:setup-xhs-poster
+/r2-uploader:setup-r2-uploader
 /douyin-poster:setup-douyin-poster
 ```
 
@@ -27,7 +29,7 @@ Claude Code plugin marketplace for media publishing tools — 社交媒体发布
 
 小红书 MCP Server — 通过 MCP 协议实现小红书的登录、发布图文笔记、管理笔记。
 
-基于 Puppeteer 浏览器自动化，支持扫码登录、多账号管理、图片上传、话题标签、定时发布、编辑、删除、R2 图床等功能。
+基于 Puppeteer 浏览器自动化，支持扫码登录、多账号管理、图文发布、话题标签、定时发布、编辑、删除等功能。
 
 **Tools:**
 
@@ -41,7 +43,6 @@ Claude Code plugin marketplace for media publishing tools — 社交媒体发布
 | `publish_content` | 发布图文笔记（支持定时、附件） |
 | `edit_note` | 编辑已发布笔记 |
 | `delete_note` | 删除笔记 |
-| `upload_image` | 上传图片到 Cloudflare R2，返回公开 URL |
 | `delete_cookies` | 删除已保存 Cookie，重置登录状态 |
 
 **环境变量:**
@@ -50,7 +51,24 @@ Claude Code plugin marketplace for media publishing tools — 社交媒体发布
 |----------|---------|-------------|
 | `XHS_HEADLESS` | `true` | `false` 可显示浏览器窗口（调试用） |
 | `XHS_COOKIES_PATH` | `~/.media-mcp/` | Cookie 存储路径 |
-| `R2_ACCOUNT_ID` | — | Cloudflare 账户 ID（可选，R2 图床用） |
+
+如需把本地图片先传到图床，再把 URL 用在其他流程里，安装单独的 `r2-uploader` 插件。
+
+### r2-uploader
+
+Cloudflare R2 MCP Server — 上传本地图片到 R2 并返回公开 URL，可单独使用，也可和 `xhs-poster` 搭配。
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `upload_image` | 上传本地图片到 Cloudflare R2，返回公开 URL |
+
+**环境变量:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `R2_ACCOUNT_ID` | — | Cloudflare 账户 ID |
 | `R2_ACCESS_KEY_ID` | — | R2 API Token Access Key |
 | `R2_SECRET_ACCESS_KEY` | — | R2 API Token Secret Key |
 | `R2_BUCKET_NAME` | — | R2 存储桶名称 |

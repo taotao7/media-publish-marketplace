@@ -1,0 +1,11 @@
+{
+  "name": "r2-uploader",
+  "description": "Upload local images to Cloudflare R2 and return public URLs.",
+  "version": "0.1.0",
+  "mcpServers": {
+    "r2-uploader": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/start.ts"]
+    }
+  }
+}

@@ -7,7 +7,9 @@ Claude Code plugin marketplace for media publishing tools.
 ```
 .claude-plugin/marketplace.json       # marketplace catalog (name: "media-publish-marketplace")
 plugins/xhs-poster/                   # XHS MCP server plugin
-  .claude-plugin/plugin.json          # plugin manifest — declares mcpServers config
+plugins/r2-uploader/                  # Cloudflare R2 uploader MCP plugin
+plugins/douyin-poster/                # Douyin MCP server plugin
+  .claude-plugin/plugin.json          # each plugin declares its own manifest
   src/index.ts                        # MCP server entry, all tool definitions
   src/mcp.ts                          # McpServer/transport wrapper
   package.json / tsconfig.json / bun.lock
@@ -110,7 +112,7 @@ Common errors: duplicate plugin names, `..` in paths, invalid JSON, non-kebab-ca
 
 ## xhs-poster Tools
 
-`list_accounts`, `check_login_status`, `get_login_qrcode`, `list_notes`, `list_all_notes`, `delete_note`, `edit_note`, `publish_content`, `upload_image`, `delete_cookies`
+`list_accounts`, `check_login_status`, `get_login_qrcode`, `list_notes`, `list_all_notes`, `delete_note`, `edit_note`, `publish_content`, `delete_cookies`
 
 ## xhs-poster Env Vars
 
@@ -118,6 +120,15 @@ Common errors: duplicate plugin names, `..` in paths, invalid JSON, non-kebab-ca
 |----------|-------------|
 | `XHS_HEADLESS` | `true` to hide browser (default) |
 | `XHS_COOKIES_PATH` | Cookie storage path |
+
+## r2-uploader Tools
+
+`upload_image`
+
+## r2-uploader Env Vars
+
+| Variable | Description |
+|----------|-------------|
 | `R2_ACCOUNT_ID` | Cloudflare account ID |
 | `R2_ACCESS_KEY_ID` | R2 API Token Access Key |
 | `R2_SECRET_ACCESS_KEY` | R2 API Token Secret Key |
