@@ -28,7 +28,8 @@
     {
       "name": "bilibili-poster",
       "source": "./plugins/bilibili-poster",
-      "description": "Publish Bilibili (B站) videos via the official Open Platform APIs"
+      "description": "Publish Bilibili (B站) videos via browser automation",
+      "skills": ["./skills/setup-bilibili-poster"]
     }
   ]
 }

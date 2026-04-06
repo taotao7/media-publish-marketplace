@@ -8,7 +8,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["node"],
     "composite": true,
     "declaration": true,
     "declarationMap": true,
