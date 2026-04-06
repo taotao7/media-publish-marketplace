@@ -1,0 +1,11 @@
+{
+  "name": "bilibili-poster",
+  "description": "Publish Bilibili (B站) videos via the official Open Platform APIs. Supports OAuth authorization, category lookup, cover upload, and video submission.",
+  "version": "0.1.0",
+  "mcpServers": {
+    "bilibili-poster": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/start.ts"]
+    }
+  }
+}

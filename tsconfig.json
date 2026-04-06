@@ -9,6 +9,7 @@
   "references": [
     { "path": "./plugins/xhs-poster" },
     { "path": "./plugins/r2-uploader" },
-    { "path": "./plugins/douyin-poster" }
+    { "path": "./plugins/douyin-poster" },
+    { "path": "./plugins/bilibili-poster" }
   ]
 }

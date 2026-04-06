@@ -24,6 +24,11 @@
       "source": "./plugins/douyin-poster",
       "description": "Publish Douyin (抖音) videos via browser automation",
       "skills": ["./skills/setup-douyin-poster"]
+    },
+    {
+      "name": "bilibili-poster",
+      "source": "./plugins/bilibili-poster",
+      "description": "Publish Bilibili (B站) videos via the official Open Platform APIs"
     }
   ]
 }
