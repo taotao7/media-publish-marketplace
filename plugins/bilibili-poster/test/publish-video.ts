@@ -3,6 +3,7 @@
  * Usage:
  *   BILIBILI_VIDEO_PATH=/abs/video.mp4 \
  *   BILIBILI_TITLE='测试投稿' \
+ *   BILIBILI_SCHEDULE_MINUTES=180 \
  *   bun run --cwd plugins/bilibili-poster test/publish-video.ts
  */
 
@@ -19,8 +20,20 @@ const category = process.env.BILIBILI_CATEGORY
 const copyright =
   process.env.BILIBILI_COPYRIGHT === "repost" ? "repost" : "original"
 const source = process.env.BILIBILI_SOURCE
+const scheduleAt =
+  process.env.BILIBILI_SCHEDULE_AT ??
+  (process.env.BILIBILI_SCHEDULE_MINUTES
+    ? new Date(
+        Date.now() + Number(process.env.BILIBILI_SCHEDULE_MINUTES) * 60 * 1000,
+      ).toISOString()
+    : undefined)
+const submitModeEnv = process.env.BILIBILI_SUBMIT_MODE
 const submitMode =
-  process.env.BILIBILI_SUBMIT_MODE === "draft" ? "draft" : "publish"
+  submitModeEnv === "draft"
+    ? "draft"
+    : submitModeEnv === "schedule" || scheduleAt
+      ? "schedule"
+      : "publish"
 
 if (!videoPath) {
   throw new Error("Set BILIBILI_VIDEO_PATH to a local video file first")
@@ -37,6 +50,7 @@ try {
     category,
     copyright,
     source,
+    scheduleAt,
     submitMode,
   })
   await managed.saveCookies()

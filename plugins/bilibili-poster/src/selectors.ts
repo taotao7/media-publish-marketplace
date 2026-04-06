@@ -88,6 +88,43 @@ export const PUBLISH_BUTTON_TEXTS = [
   "确认投稿",
 ] as const
 
+export const SCHEDULE_TOGGLE_TEXTS = [
+  "定时发布",
+  "预约发布",
+  "定时投稿",
+  "预约投稿",
+] as const
+
+export const SCHEDULE_INPUT_SELECTORS = [
+  "input[placeholder*='发布时间']",
+  "input[placeholder*='请选择日期']",
+  "input[placeholder*='选择日期']",
+  "input[placeholder*='日期时间']",
+  "input[placeholder*='日期']",
+  "input[placeholder*='时间']",
+  "[class*='date-picker'] input",
+  "[class*='time-picker'] input",
+  "[class*='picker'] input",
+] as const
+
+export const SCHEDULE_CONFIRM_TEXTS = [
+  "确定",
+  "确认",
+  "完成",
+  "保存",
+] as const
+
+export const SCHEDULE_SUBMIT_BUTTON_TEXTS = [
+  "确认预约",
+  "预约发布",
+  "定时发布",
+  "预约投稿",
+  "立即投稿",
+  "提交稿件",
+  "立即发布",
+  "确认投稿",
+] as const
+
 export const PUBLISH_PENDING_TEXTS = [
   "上传中",
   "处理中",
@@ -105,6 +142,15 @@ export const PUBLISH_SUCCESS_TEXTS = [
   "提交成功",
   "上传成功",
   "投稿完成",
+] as const
+
+export const SCHEDULE_SUCCESS_TEXTS = [
+  "预约成功",
+  "预约发布成功",
+  "定时发布成功",
+  "定时投稿成功",
+  "已进入定时发布",
+  "已设置发布时间",
 ] as const
 
 export const PUBLISH_ERROR_TEXTS = [

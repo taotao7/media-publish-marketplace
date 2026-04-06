@@ -11,6 +11,11 @@ import {
   PUBLISH_ERROR_TEXTS,
   PUBLISH_PENDING_TEXTS,
   PUBLISH_SUCCESS_TEXTS,
+  SCHEDULE_CONFIRM_TEXTS,
+  SCHEDULE_INPUT_SELECTORS,
+  SCHEDULE_SUBMIT_BUTTON_TEXTS,
+  SCHEDULE_SUCCESS_TEXTS,
+  SCHEDULE_TOGGLE_TEXTS,
   SOURCE_INPUT_SELECTORS,
   TAG_INPUT_SELECTORS,
   TITLE_INPUT_SELECTORS,
@@ -18,9 +23,13 @@ import {
 
 const VIDEO_UPLOAD_TIMEOUT_MS = 15 * 60_000
 const PUBLISH_RESULT_TIMEOUT_MS = 2 * 60_000
+const SCHEDULE_VERIFY_TIMEOUT_MS = 15_000
 const MAX_TITLE_LENGTH = 80
 const MAX_DESCRIPTION_LENGTH = 2_000
 const MAX_TAG_COUNT = 12
+const SCHEDULE_INPUT_MARKER_ATTR = "data-bilibili-schedule-target"
+
+type SubmitMode = "publish" | "draft" | "schedule"
 
 export interface PublishParams {
   readonly title: string
@@ -30,7 +39,21 @@ export interface PublishParams {
   readonly category?: string
   readonly copyright?: "original" | "repost"
   readonly source?: string
-  readonly submitMode?: "publish" | "draft"
+  readonly scheduleAt?: string
+  readonly submitMode?: SubmitMode
+}
+
+interface ScheduleValues {
+  readonly date: string
+  readonly time: string
+  readonly dateTime: string
+}
+
+interface MarkedScheduleInputs {
+  readonly combined: boolean
+  readonly date: boolean
+  readonly time: boolean
+  readonly hints: readonly string[]
 }
 
 export async function publishVideo(
@@ -83,7 +106,11 @@ export async function publishVideo(
     await fillTags(page, params.tags.slice(0, MAX_TAG_COUNT))
   }
 
-  const submitMode = params.submitMode ?? "publish"
+  const submitMode = resolveSubmitMode(params)
+  if (submitMode === "schedule") {
+    await setSchedule(page, params.scheduleAt ?? "")
+  }
+
   await submitPublish(page, submitMode)
   await waitForPublishResult(page, submitMode)
 }
@@ -98,6 +125,27 @@ function validateParams(params: PublishParams): void {
   if ((params.copyright ?? "original") === "repost" && !params.source?.trim()) {
     throw new Error("source is required when copyright is repost")
   }
+
+  resolveSubmitMode(params)
+}
+
+function resolveSubmitMode(params: Pick<PublishParams, "submitMode" | "scheduleAt">): SubmitMode {
+  const requestedMode = params.submitMode ?? "publish"
+  const hasScheduleAt = Boolean(params.scheduleAt?.trim())
+
+  if (requestedMode === "draft" && hasScheduleAt) {
+    throw new Error("scheduleAt cannot be combined with submitMode='draft'")
+  }
+
+  if (requestedMode === "schedule" && !hasScheduleAt) {
+    throw new Error("scheduleAt is required when submitMode is 'schedule'")
+  }
+
+  if (hasScheduleAt) {
+    return "schedule"
+  }
+
+  return requestedMode
 }
 
 async function uploadVideoFile(page: Page, videoPath: string): Promise<void> {
@@ -236,10 +284,14 @@ async function selectCategory(page: Page, category: string): Promise<void> {
 
 async function submitPublish(
   page: Page,
-  submitMode: "publish" | "draft",
+  submitMode: SubmitMode,
 ): Promise<void> {
   const buttonTexts =
-    submitMode === "draft" ? (["存草稿"] as const) : PUBLISH_BUTTON_TEXTS
+    submitMode === "draft"
+      ? (["存草稿"] as const)
+      : submitMode === "schedule"
+        ? SCHEDULE_SUBMIT_BUTTON_TEXTS
+        : PUBLISH_BUTTON_TEXTS
 
   const clickedByText = await clickByTexts(page, buttonTexts)
   if (!clickedByText) {
@@ -248,7 +300,9 @@ async function submitPublish(
       throw new Error(
         submitMode === "draft"
           ? "Bilibili draft button not found"
-          : "Bilibili publish button not found",
+          : submitMode === "schedule"
+            ? "Bilibili schedule submit button not found"
+            : "Bilibili publish button not found",
       )
     }
     await page.click(selector)
@@ -265,14 +319,16 @@ async function submitPublish(
 
 async function waitForPublishResult(
   page: Page,
-  submitMode: "publish" | "draft",
+  submitMode: SubmitMode,
 ): Promise<void> {
   const deadline = Date.now() + PUBLISH_RESULT_TIMEOUT_MS
   const startUrl = page.url()
   const successTexts =
     submitMode === "draft"
       ? (["保存成功", "草稿保存成功", "已保存草稿", "已存入草稿箱"] as const)
-      : PUBLISH_SUCCESS_TEXTS
+      : submitMode === "schedule"
+        ? SCHEDULE_SUCCESS_TEXTS
+        : PUBLISH_SUCCESS_TEXTS
 
   while (Date.now() < deadline) {
     const bodyText = await getBodyText(page)
@@ -296,7 +352,9 @@ async function waitForPublishResult(
       throw new Error(
         submitMode === "draft"
           ? `Bilibili draft save failed: ${hit}`
-          : `Bilibili publish failed: ${hit}`,
+          : submitMode === "schedule"
+            ? `Bilibili schedule publish failed: ${hit}`
+            : `Bilibili publish failed: ${hit}`,
       )
     }
 
@@ -310,8 +368,41 @@ async function waitForPublishResult(
   throw new Error(
     submitMode === "draft"
       ? "Timed out waiting for the Bilibili draft result"
-      : "Timed out waiting for the Bilibili publish result",
+      : submitMode === "schedule"
+        ? "Timed out waiting for the Bilibili schedule publish result"
+        : "Timed out waiting for the Bilibili publish result",
   )
+}
+
+async function setSchedule(page: Page, isoDate: string): Promise<void> {
+  const schedule = parseScheduleAt(isoDate)
+
+  let inputs = await markScheduleInputs(page)
+  if (!hasMarkedScheduleInputs(inputs)) {
+    const toggled =
+      (await clickByTexts(page, SCHEDULE_TOGGLE_TEXTS, true)) ||
+      (await clickByTexts(page, SCHEDULE_TOGGLE_TEXTS))
+
+    if (!toggled) {
+      throw new Error("Bilibili schedule toggle not found")
+    }
+
+    await delay(800)
+    inputs = await waitForScheduleInputs(page, 10_000)
+  }
+
+  const filled = await fillScheduleInputs(page, schedule)
+  if (!filled) {
+    const hints = inputs.hints.length > 0 ? inputs.hints.join(" | ") : "none"
+    throw new Error(`Bilibili schedule input not found. hints=${hints}`)
+  }
+
+  const confirmed = await clickByTexts(page, SCHEDULE_CONFIRM_TEXTS, true)
+  if (confirmed) {
+    await delay(500)
+  }
+
+  await ensureScheduleValues(page, schedule)
 }
 
 async function waitForFileInput(
@@ -420,6 +511,259 @@ async function getBodyText(page: Page): Promise<string> {
 
 function containsAny(text: string, needles: readonly string[]): boolean {
   return needles.some((needle) => text.includes(needle))
+}
+
+function hasMarkedScheduleInputs(inputs: MarkedScheduleInputs): boolean {
+  return inputs.combined || inputs.date || inputs.time
+}
+
+function parseScheduleAt(isoDate: string): ScheduleValues {
+  const d = new Date(isoDate)
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`scheduleAt is not a valid ISO 8601 date: ${isoDate}`)
+  }
+
+  if (d.getTime() <= Date.now()) {
+    throw new Error(`scheduleAt must be in the future. Got: ${isoDate}`)
+  }
+
+  const date = [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-")
+  const time = [
+    String(d.getHours()).padStart(2, "0"),
+    String(d.getMinutes()).padStart(2, "0"),
+  ].join(":")
+
+  return {
+    date,
+    time,
+    dateTime: `${date} ${time}`,
+  }
+}
+
+async function waitForScheduleInputs(
+  page: Page,
+  timeoutMs: number,
+): Promise<MarkedScheduleInputs> {
+  const deadline = Date.now() + timeoutMs
+  let last = await markScheduleInputs(page)
+
+  while (Date.now() < deadline) {
+    if (hasMarkedScheduleInputs(last)) {
+      return last
+    }
+
+    await delay(300)
+    last = await markScheduleInputs(page)
+  }
+
+  return last
+}
+
+async function markScheduleInputs(page: Page): Promise<MarkedScheduleInputs> {
+  return page.evaluate(
+    ({ markerAttr, selectors }) => {
+      const isVisible = (element: Element): boolean => {
+        const htmlElement = element as HTMLElement
+        const style = window.getComputedStyle(htmlElement)
+        const rect = htmlElement.getBoundingClientRect()
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          rect.width > 0 &&
+          rect.height > 0
+        )
+      }
+
+      document
+        .querySelectorAll(`input[${markerAttr}]`)
+        .forEach((element) => element.removeAttribute(markerAttr))
+
+      const candidates = Array.from(document.querySelectorAll("input"))
+        .filter((element): element is HTMLInputElement =>
+          element instanceof HTMLInputElement && !element.disabled && isVisible(element),
+        )
+        .map((input) => {
+          const rect = input.getBoundingClientRect()
+          const selectorMatch = selectors.some((selector) => {
+            try {
+              return input.matches(selector)
+            } catch {
+              return false
+            }
+          })
+          const hint = [
+            input.placeholder,
+            input.getAttribute("aria-label") ?? "",
+            input.name,
+            input.id,
+            input.className,
+            input.parentElement?.textContent ?? "",
+          ]
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim()
+
+          return {
+            input,
+            hint,
+            top: rect.top,
+            left: rect.left,
+            selectorMatch,
+          }
+        })
+        .filter(
+          ({ hint, selectorMatch }) =>
+            selectorMatch || /时间|日期|发布|预约|定时|date|time|schedule/i.test(hint),
+        )
+        .sort((left, right) => {
+          if (left.top !== right.top) return left.top - right.top
+          return left.left - right.left
+        })
+
+      const combinedCandidate =
+        candidates.find(({ hint }) =>
+          /发布时间|日期时间|日期和时间|选择日期时间|schedule/i.test(hint),
+        ) ?? null
+
+      const dateCandidate =
+        candidates.find(({ hint }) => /日期|date/i.test(hint) && !/时间|time/i.test(hint)) ??
+        null
+
+      const timeCandidate =
+        candidates.find(({ hint }) => /时间|time/i.test(hint) && !/日期|date/i.test(hint)) ??
+        null
+
+      if (dateCandidate && timeCandidate && dateCandidate.input !== timeCandidate.input) {
+        dateCandidate.input.setAttribute(markerAttr, "date")
+        timeCandidate.input.setAttribute(markerAttr, "time")
+      } else if (combinedCandidate) {
+        combinedCandidate.input.setAttribute(markerAttr, "combined")
+      } else if (candidates.length >= 2) {
+        candidates[0]?.input.setAttribute(markerAttr, "date")
+        candidates[1]?.input.setAttribute(markerAttr, "time")
+      } else if (candidates[0]) {
+        candidates[0].input.setAttribute(markerAttr, "combined")
+      }
+
+      return {
+        combined: Boolean(document.querySelector(`input[${markerAttr}='combined']`)),
+        date: Boolean(document.querySelector(`input[${markerAttr}='date']`)),
+        time: Boolean(document.querySelector(`input[${markerAttr}='time']`)),
+        hints: candidates.map(({ hint }) => hint.slice(0, 120)).slice(0, 5),
+      }
+    },
+    {
+      markerAttr: SCHEDULE_INPUT_MARKER_ATTR,
+      selectors: [...SCHEDULE_INPUT_SELECTORS],
+    },
+  )
+}
+
+async function fillScheduleInputs(
+  page: Page,
+  schedule: ScheduleValues,
+): Promise<boolean> {
+  const marked = await markScheduleInputs(page)
+
+  if (marked.combined) {
+    return fillMarkedScheduleInput(page, "combined", schedule.dateTime)
+  }
+
+  let filled = false
+  if (marked.date) {
+    filled = (await fillMarkedScheduleInput(page, "date", schedule.date)) || filled
+  }
+  if (marked.time) {
+    filled = (await fillMarkedScheduleInput(page, "time", schedule.time)) || filled
+  }
+
+  return filled
+}
+
+async function fillMarkedScheduleInput(
+  page: Page,
+  target: "combined" | "date" | "time",
+  value: string,
+): Promise<boolean> {
+  const selector = `input[${SCHEDULE_INPUT_MARKER_ATTR}='${target}']`
+  const handle = (await page.$(selector)) as ElementHandle<HTMLInputElement> | null
+  if (!handle) {
+    return false
+  }
+
+  await handle.click({ clickCount: 3 }).catch(async () => {
+    await page.focus(selector).catch(() => {})
+  })
+  await page.focus(selector).catch(() => {})
+  await selectAllAndDelete(page)
+  await page.keyboard.type(value, { delay: 20 })
+  await delay(300)
+  await page.keyboard.press("Enter").catch(() => {})
+  await delay(300)
+  await handle.dispose().catch(() => {})
+  return true
+}
+
+async function ensureScheduleValues(
+  page: Page,
+  schedule: ScheduleValues,
+): Promise<void> {
+  const deadline = Date.now() + SCHEDULE_VERIFY_TIMEOUT_MS
+  let lastValues = ""
+
+  while (Date.now() < deadline) {
+    await markScheduleInputs(page)
+
+    const [combined, date, time] = await Promise.all([
+      readMarkedScheduleInputValue(page, "combined"),
+      readMarkedScheduleInputValue(page, "date"),
+      readMarkedScheduleInputValue(page, "time"),
+    ])
+
+    const normalizedCombined = normalizeScheduleValue(combined)
+    const normalizedDate = normalizeScheduleValue(date)
+    const normalizedTime = normalizeScheduleValue(time)
+
+    lastValues = [combined, date, time].filter(Boolean).join(" | ")
+
+    if (
+      (normalizedCombined &&
+        normalizedCombined.includes(schedule.date) &&
+        normalizedCombined.includes(schedule.time)) ||
+      (normalizedDate.includes(schedule.date) && normalizedTime.includes(schedule.time))
+    ) {
+      return
+    }
+
+    await delay(300)
+  }
+
+  throw new Error(
+    `Failed to confirm Bilibili schedule value. expected=${schedule.dateTime} actual=${lastValues || "unavailable"}`,
+  )
+}
+
+async function readMarkedScheduleInputValue(
+  page: Page,
+  target: "combined" | "date" | "time",
+): Promise<string> {
+  const selector = `input[${SCHEDULE_INPUT_MARKER_ATTR}='${target}']`
+  return page
+    .$eval(selector, (element) => {
+      if (!(element instanceof HTMLInputElement)) {
+        return ""
+      }
+      return element.value ?? ""
+    })
+    .catch(() => "")
+}
+
+function normalizeScheduleValue(value: string): string {
+  return value.replace(/[/.]/g, "-").replace(/\s+/g, " ").trim()
 }
 
 async function selectAllAndDelete(page: Page): Promise<void> {

@@ -21,6 +21,8 @@ import {
 
 const VIDEO_UPLOAD_TIMEOUT_MS = 300_000
 const IMAGE_UPLOAD_TIMEOUT_MS = 180_000
+const IMAGE_UPLOAD_STABLE_WINDOW_MS = 4_000
+const IMAGE_UPLOAD_NEXT_DELAY_MS = 2_500
 const SUBMIT_READY_TIMEOUT_MS = 300_000
 const PUBLISH_RESULT_TIMEOUT_MS = 120_000
 const MAX_TITLE_LENGTH = 60
@@ -224,6 +226,7 @@ export async function publishImages(
     }
 
     for (let i = 0; i < params.imagePaths.length; i++) {
+      const expectedCount = i + 1
       if (i === 0) {
         const input = (await waitForFirstHandle(
           page,
@@ -236,10 +239,7 @@ export async function publishImages(
           page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {}),
           input.uploadFile(params.imagePaths[i]),
         ])
-        await delay(3_000)
       } else {
-        await waitForImageUploaded(page, i)
-
         const addBtn = await page.$(ADD_MORE_IMAGES_BUTTON_SELECTOR)
         if (!addBtn) {
           throw new Error(`继续添加 button not found for image index ${i}`)
@@ -250,10 +250,17 @@ export async function publishImages(
           addBtn.click(),
         ])
         await chooser.accept([params.imagePaths[i]])
-        await delay(2_000)
+      }
+
+      await waitForImageUploadSettled(page, expectedCount)
+
+      if (expectedCount < params.imagePaths.length) {
+        console.error(
+          `[douyin] image ${expectedCount}/${params.imagePaths.length} settled, waiting before next upload`,
+        )
+        await delay(IMAGE_UPLOAD_NEXT_DELAY_MS)
       }
     }
-    await waitForImageUploaded(page, params.imagePaths.length)
 
     await selectMusic(page)
 
@@ -303,6 +310,47 @@ async function waitForImageUploaded(page: Page, expectedCount: number): Promise<
   const processingText = await getProcessingText(page)
   const status = processingText ? ` processing=${processingText}` : ""
   throw new Error(`Image upload timed out waiting for ${expectedCount} uploaded thumbnail(s), current=${lastCount}.${status}`)
+}
+
+async function waitForImageUploadSettled(page: Page, expectedCount: number): Promise<void> {
+  await waitForImageUploaded(page, expectedCount)
+
+  const deadline = Date.now() + IMAGE_UPLOAD_TIMEOUT_MS
+  let stableSince = 0
+  let lastStatus = ""
+
+  while (Date.now() < deadline) {
+    const [count, processingText] = await Promise.all([
+      countUploadedImages(page),
+      getProcessingText(page),
+    ])
+
+    const ready = count >= expectedCount && !processingText
+    const status = `count=${count}/${expectedCount} processing=${processingText ?? "clear"}`
+    if (status !== lastStatus) {
+      console.error(`[douyin] image upload settle: ${status}`)
+      lastStatus = status
+    }
+
+    if (ready) {
+      if (!stableSince) {
+        stableSince = Date.now()
+      }
+      if (Date.now() - stableSince >= IMAGE_UPLOAD_STABLE_WINDOW_MS) {
+        return
+      }
+    } else {
+      stableSince = 0
+    }
+
+    await delay(500)
+  }
+
+  const processingText = await getProcessingText(page)
+  const status = processingText ? ` processing=${processingText}` : ""
+  throw new Error(
+    `Image upload did not settle for ${expectedCount} uploaded thumbnail(s).${status}`,
+  )
 }
 
 async function withPrepareRetry(

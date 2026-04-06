@@ -168,10 +168,14 @@ server.tool(
       .string()
       .optional()
       .describe("Required when copyright is repost."),
-    submit_mode: z
-      .enum(["publish", "draft"])
+    schedule_at: z
+      .string()
       .optional()
-      .describe("Whether to submit the video immediately or save it as a draft. Defaults to publish."),
+      .describe("ISO 8601 datetime to schedule the submission. If provided, the video will be scheduled instead of published immediately."),
+    submit_mode: z
+      .enum(["publish", "draft", "schedule"])
+      .optional()
+      .describe("Whether to publish immediately, save as a draft, or schedule publication. Defaults to publish. If schedule_at is provided, schedule mode is used automatically."),
   },
   async ({
     account,
@@ -182,6 +186,7 @@ server.tool(
     category,
     copyright,
     source,
+    schedule_at,
     submit_mode,
   }): Promise<CallToolResult> => {
     const acct = account || DEFAULT_ACCOUNT
@@ -196,18 +201,28 @@ server.tool(
         category,
         copyright,
         source,
+        scheduleAt: schedule_at,
         submitMode: submit_mode,
       })
       await managed.saveCookies()
+
+      const effectiveMode =
+        schedule_at || submit_mode === "schedule"
+          ? "schedule"
+          : submit_mode === "draft"
+            ? "draft"
+            : "publish"
 
       return {
         content: [
           {
             type: "text",
             text:
-              submit_mode === "draft"
+              effectiveMode === "draft"
                 ? `Bilibili video draft saved successfully (account: ${acct}).`
-                : `Bilibili video submitted successfully (account: ${acct}).`,
+                : effectiveMode === "schedule"
+                  ? `Bilibili video scheduled for ${schedule_at} (account: ${acct}).`
+                  : `Bilibili video submitted successfully (account: ${acct}).`,
           },
         ],
       }
