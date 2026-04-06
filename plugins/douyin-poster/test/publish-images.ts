@@ -9,8 +9,10 @@ import { launchBrowser } from "../src/browser.js"
 import { publishImages } from "../src/publish.js"
 
 const TEST_IMAGES = [
-  "/Users/tao/Pictures/wallhaven-qdyxlq.jpg",
+  process.env.DOUYIN_IMAGE_PATH ?? "/Users/tao/Pictures/wallhaven-qdyxlq.jpg",
 ]
+const SCHEDULE_MINUTES = Number(process.env.DOUYIN_SCHEDULE_MINUTES ?? "180")
+const scheduleAt = new Date(Date.now() + SCHEDULE_MINUTES * 60 * 1000).toISOString()
 
 const managed = await launchBrowser("default")
 
@@ -21,6 +23,7 @@ try {
     imagePaths: TEST_IMAGES,
     tags: ["效率工具", "工作流", "生产力", "AI工具", "日常分享"],
     visibility: "private",
+    scheduleAt,
   })
   await managed.saveCookies()
   console.error("[test] image post published successfully")

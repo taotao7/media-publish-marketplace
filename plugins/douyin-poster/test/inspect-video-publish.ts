@@ -4,7 +4,9 @@
 import { launchBrowser } from "../src/browser.js"
 import { CREATOR_UPLOAD_URL, TITLE_INPUT_SELECTORS, DESCRIPTION_INPUT_SELECTORS, PUBLISH_BUTTON_SELECTORS } from "../src/selectors.js"
 
-const VIDEO_PATH = "/Users/tao/Desktop/Screen Recording 2026-03-26 at 10.59.31.mov"
+const VIDEO_PATH =
+  process.env.DOUYIN_VIDEO_PATH ??
+  "/Users/tao/Desktop/Screen Recording 2026-03-26 at 10.59.31.mov"
 
 const managed = await launchBrowser("default")
 const page = managed.page
@@ -65,6 +67,50 @@ const buttons = await page.evaluate(() =>
     }))
 )
 console.error("[buttons on page]", JSON.stringify(buttons, null, 2))
+
+const mediaState = await page.evaluate(() => ({
+  url: location.href,
+  videos: Array.from(document.querySelectorAll("video")).map((el) => {
+    const rect = el.getBoundingClientRect()
+    return {
+      className: el.className.slice(0, 80),
+      src: (el as HTMLVideoElement).src.slice(0, 120),
+      visible: rect.width > 0 && rect.height > 0,
+      size: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+    }
+  }),
+  canvases: Array.from(document.querySelectorAll("canvas")).map((el) => {
+    const rect = el.getBoundingClientRect()
+    return {
+      className: el.className.slice(0, 80),
+      visible: rect.width > 0 && rect.height > 0,
+      size: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+    }
+  }),
+  images: Array.from(document.querySelectorAll("img"))
+    .map((el) => {
+      const rect = el.getBoundingClientRect()
+      return {
+        className: el.className.slice(0, 80),
+        src: el.src.slice(0, 120),
+        visible: rect.width > 0 && rect.height > 0,
+        size: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+      }
+    })
+    .filter((item) => item.visible)
+    .slice(0, 12),
+  textHints: Array.from(document.querySelectorAll("div, span, p"))
+    .filter((el) => el.children.length <= 1)
+    .map((el) => el.textContent?.replace(/\s+/g, " ").trim() ?? "")
+    .filter(
+      (text) =>
+        text.length > 0 &&
+        text.length <= 120 &&
+        (text.includes("上传") || text.includes("处理中") || text.includes("封面")),
+    )
+    .slice(0, 20),
+}))
+console.error("[media state]", JSON.stringify(mediaState, null, 2))
 
 // Check which PUBLISH_BUTTON_SELECTORS match
 for (const sel of PUBLISH_BUTTON_SELECTORS) {

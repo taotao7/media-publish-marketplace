@@ -6,15 +6,19 @@ import { launchBrowser } from "../src/browser.js"
 import { publishImages } from "../src/publish.js"
 
 const managed = await launchBrowser("default")
+const IMAGE_PATH =
+  process.env.DOUYIN_IMAGE_PATH ??
+  "/Users/tao/Pictures/wallhaven-qdyxlq.jpg"
+const SCHEDULE_MINUTES = Number(process.env.DOUYIN_SCHEDULE_MINUTES ?? "180")
 
-// Use schedule 2hr from now to avoid accidental publish
-const scheduleAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+// Use schedule in the future to avoid accidental immediate publish.
+const scheduleAt = new Date(Date.now() + SCHEDULE_MINUTES * 60 * 1000).toISOString()
 
 try {
   await publishImages(managed.page, {
     title: "诊断测试帖",
     content: "测试内容",
-    imagePaths: ["/Users/tao/Downloads/example/ScreenShot_2026-03-18_132442_748.png"],
+    imagePaths: [IMAGE_PATH],
     tags: ["测试"],
     visibility: "private",
     scheduleAt,

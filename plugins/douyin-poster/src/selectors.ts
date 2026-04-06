@@ -28,9 +28,14 @@ export const IMAGE_FILE_INPUT_SELECTORS = [
   "input[type='file']",
 ] as const
 
-// After image upload the thumbnail uses CSS background-image, not <img src>
+// Image upload may render either as background-image or as a real <img>.
+export const IMAGE_UPLOADED_INDICATOR_SELECTORS = [
+  "[style*='creator-media-private.douyin.com']",
+  "img[src*='creator-media-private.douyin.com']",
+] as const
+
 export const IMAGE_UPLOADED_INDICATOR_SELECTOR =
-  "[style*='creator-media-private.douyin.com']" as const
+  IMAGE_UPLOADED_INDICATOR_SELECTORS[0]
 
 export const ADD_MORE_IMAGES_TEXTS = ["继续添加"] as const
 export const ADD_MORE_IMAGES_BUTTON_SELECTOR = "button[class*='continue-add']" as const
@@ -57,6 +62,7 @@ export const DESCRIPTION_INPUT_SELECTORS = [
   "textarea[placeholder*='作品描述']",
   "[contenteditable='true'][data-placeholder*='描述']",
   "[contenteditable='true'][data-placeholder*='简介']",
+  "[data-slate-editor='true'][contenteditable='true']",
 ] as const
 
 export const TAG_INPUT_SELECTORS = [
