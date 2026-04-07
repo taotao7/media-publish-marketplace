@@ -21,8 +21,8 @@ import {
 
 const VIDEO_UPLOAD_TIMEOUT_MS = 300_000
 const IMAGE_UPLOAD_TIMEOUT_MS = 180_000
-const IMAGE_UPLOAD_STABLE_WINDOW_MS = 2_500
-const IMAGE_UPLOAD_NEXT_DELAY_MS = 2_500
+const IMAGE_UPLOAD_STABLE_WINDOW_MS = 800
+const IMAGE_UPLOAD_NEXT_DELAY_MS = 500
 const SUBMIT_READY_TIMEOUT_MS = 300_000
 const PUBLISH_RESULT_TIMEOUT_MS = 120_000
 const MAX_TITLE_LENGTH = 60
@@ -225,41 +225,39 @@ export async function publishImages(
       }
     }
 
-    for (let i = 0; i < params.imagePaths.length; i++) {
-      const expectedCount = i + 1
-      if (i === 0) {
-        const input = (await waitForFirstHandle(
-          page,
-          IMAGE_FILE_INPUT_SELECTORS,
-          30_000,
-        )) as ElementHandle<HTMLInputElement> | null
-        if (!input) throw new Error("Image file input not found")
+    // Upload first image via the initial file input (triggers page navigation)
+    const input = (await waitForFirstHandle(
+      page,
+      IMAGE_FILE_INPUT_SELECTORS,
+      30_000,
+    )) as ElementHandle<HTMLInputElement> | null
+    if (!input) throw new Error("Image file input not found")
 
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {}),
-          input.uploadFile(params.imagePaths[i]),
-        ])
-      } else {
-        const addBtn = await page.$(ADD_MORE_IMAGES_BUTTON_SELECTOR)
-        if (!addBtn) {
-          throw new Error(`继续添加 button not found for image index ${i}`)
-        }
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {}),
+      input.uploadFile(params.imagePaths[0]),
+    ])
+    await waitForImageUploadSettled(page, 1)
 
-        const [chooser] = await Promise.all([
-          page.waitForFileChooser({ timeout: 5_000 }),
-          addBtn.click(),
-        ])
-        await chooser.accept([params.imagePaths[i]])
+    // Upload remaining images in one batch via "继续添加" button
+    if (params.imagePaths.length > 1) {
+      const remainingPaths = params.imagePaths.slice(1)
+
+      const addBtn = await page.$(ADD_MORE_IMAGES_BUTTON_SELECTOR)
+      if (!addBtn) {
+        throw new Error("继续添加 button not found for batch upload")
       }
 
-      await waitForImageUploadSettled(page, expectedCount)
+      const [chooser] = await Promise.all([
+        page.waitForFileChooser({ timeout: 5_000 }),
+        addBtn.click(),
+      ])
+      await chooser.accept([...remainingPaths])
 
-      if (expectedCount < params.imagePaths.length) {
-        console.error(
-          `[douyin] image ${expectedCount}/${params.imagePaths.length} settled, waiting before next upload`,
-        )
-        await delay(IMAGE_UPLOAD_NEXT_DELAY_MS)
-      }
+      await waitForImageUploadSettled(page, params.imagePaths.length)
+      console.error(
+        `[douyin] all ${params.imagePaths.length} images uploaded`,
+      )
     }
 
     await selectMusic(page)
