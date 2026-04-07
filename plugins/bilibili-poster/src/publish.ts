@@ -11,11 +11,8 @@ import {
   PUBLISH_ERROR_TEXTS,
   PUBLISH_PENDING_TEXTS,
   PUBLISH_SUCCESS_TEXTS,
-  SCHEDULE_CONFIRM_TEXTS,
-  SCHEDULE_INPUT_SELECTORS,
   SCHEDULE_SUBMIT_BUTTON_TEXTS,
   SCHEDULE_SUCCESS_TEXTS,
-  SCHEDULE_TOGGLE_TEXTS,
   SOURCE_INPUT_SELECTORS,
   TAG_INPUT_SELECTORS,
   TITLE_INPUT_SELECTORS,
@@ -27,7 +24,7 @@ const SCHEDULE_VERIFY_TIMEOUT_MS = 15_000
 const MAX_TITLE_LENGTH = 80
 const MAX_DESCRIPTION_LENGTH = 2_000
 const MAX_TAG_COUNT = 12
-const SCHEDULE_INPUT_MARKER_ATTR = "data-bilibili-schedule-target"
+const MAX_MONTH_NAVIGATIONS = 12
 
 type SubmitMode = "publish" | "draft" | "schedule"
 
@@ -44,16 +41,14 @@ export interface PublishParams {
 }
 
 interface ScheduleValues {
+  readonly year: number
+  readonly month: number
+  readonly day: number
+  readonly hour: number
+  readonly minute: number
   readonly date: string
   readonly time: string
   readonly dateTime: string
-}
-
-interface MarkedScheduleInputs {
-  readonly combined: boolean
-  readonly date: boolean
-  readonly time: boolean
-  readonly hints: readonly string[]
 }
 
 export async function publishVideo(
@@ -112,6 +107,10 @@ export async function publishVideo(
   }
 
   await submitPublish(page, submitMode)
+
+  // Debug: capture page state right after submit click
+  await page.screenshot({ path: "/tmp/bili-after-submit.png", fullPage: true }).catch(() => {})
+
   await waitForPublishResult(page, submitMode)
 }
 
@@ -293,10 +292,24 @@ async function submitPublish(
         ? SCHEDULE_SUBMIT_BUTTON_TEXTS
         : PUBLISH_BUTTON_TEXTS
 
-  const clickedByText = await clickByTexts(page, buttonTexts)
-  if (!clickedByText) {
+  // Dismiss overlapping notification banners (B站 shows a toast over the submit button)
+  await dismissOverlays(page)
+
+  // Scroll the submit area into view
+  await page.evaluate(() => {
+    const el = document.querySelector(".submit-container, .submit-add, [class*='submit']")
+    el?.scrollIntoView({ block: "center" })
+  })
+  await delay(500)
+
+  // Click submit using mouse coordinates to bypass any remaining overlays
+  const clicked = await clickButtonByCoords(page, buttonTexts)
+  if (!clicked) {
+    // Fallback to selector-based click
     const selector = await firstExistingSelector(page, PUBLISH_BUTTON_SELECTORS)
-    if (!selector) {
+    if (selector) {
+      await page.click(selector)
+    } else {
       throw new Error(
         submitMode === "draft"
           ? "Bilibili draft button not found"
@@ -305,7 +318,6 @@ async function submitPublish(
             : "Bilibili publish button not found",
       )
     }
-    await page.click(selector)
   }
 
   await delay(1_000)
@@ -315,6 +327,81 @@ async function submitPublish(
     await clickByTexts(page, ["确认投稿", "确认发布", "确认", "继续投稿"])
     await delay(500)
   }
+}
+
+async function dismissOverlays(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    // Close the "信息填完后，就可投稿！不需等待上传完成哦~" banner
+    const allElements = Array.from(document.querySelectorAll("*")) as HTMLElement[]
+    for (const el of allElements) {
+      const text = el.innerText?.trim() ?? ""
+      // Look for the × close button on notification banners near the submit area
+      if (text === "×" || text === "✕" || text === "x") {
+        const rect = el.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0 && rect.top > 400) {
+          el.click()
+        }
+      }
+    }
+  })
+  await delay(300)
+}
+
+async function clickButtonByCoords(
+  page: Page,
+  texts: readonly string[],
+): Promise<boolean> {
+  // Find the target element (span, div, button, or a) with matching text
+  const rect = await page.evaluate((candidates) => {
+    const nodes = Array.from(
+      document.querySelectorAll("button, div, span, a"),
+    ) as HTMLElement[]
+
+    const match = nodes
+      .filter((node) => {
+        const text = node.innerText?.replace(/\s+/g, " ").trim() ?? ""
+        if (!text || text.length > 40) return false
+        if (node.offsetWidth === 0 || node.offsetHeight === 0) return false
+        return candidates.some((c) => text === c)
+      })
+      // Prefer exact match, then shorter text
+      .sort((a, b) => {
+        const aText = a.innerText?.replace(/\s+/g, " ").trim() ?? ""
+        const bText = b.innerText?.replace(/\s+/g, " ").trim() ?? ""
+        return aText.length - bText.length
+      })
+
+    const target = match[0]
+    if (!target) return null
+
+    target.scrollIntoView({ block: "center" })
+    const r = target.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  }, [...texts])
+
+  if (!rect) return false
+
+  // Wait for scroll to settle, then re-query
+  await delay(300)
+
+  const freshRect = await page.evaluate((candidates) => {
+    const nodes = Array.from(
+      document.querySelectorAll("button, div, span, a"),
+    ) as HTMLElement[]
+    const match = nodes.find((node) => {
+      const text = node.innerText?.replace(/\s+/g, " ").trim() ?? ""
+      return text && text.length <= 40 && node.offsetWidth > 0 &&
+        candidates.some((c) => text === c)
+    })
+    if (!match) return null
+    const r = match.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  }, [...texts])
+
+  if (!freshRect) return false
+
+  await page.mouse.click(freshRect.x, freshRect.y)
+  return true
 }
 
 async function waitForPublishResult(
@@ -327,7 +414,7 @@ async function waitForPublishResult(
     submitMode === "draft"
       ? (["保存成功", "草稿保存成功", "已保存草稿", "已存入草稿箱"] as const)
       : submitMode === "schedule"
-        ? SCHEDULE_SUCCESS_TEXTS
+        ? ([...SCHEDULE_SUCCESS_TEXTS, ...PUBLISH_SUCCESS_TEXTS] as const)
         : PUBLISH_SUCCESS_TEXTS
 
   while (Date.now() < deadline) {
@@ -377,32 +464,208 @@ async function waitForPublishResult(
 async function setSchedule(page: Page, isoDate: string): Promise<void> {
   const schedule = parseScheduleAt(isoDate)
 
-  let inputs = await markScheduleInputs(page)
-  if (!hasMarkedScheduleInputs(inputs)) {
-    const toggled =
-      (await clickByTexts(page, SCHEDULE_TOGGLE_TEXTS, true)) ||
-      (await clickByTexts(page, SCHEDULE_TOGGLE_TEXTS))
+  // Step 1: click the switch to enable schedule
+  const switchSelector = ".time-switch-wrp .switch-container"
+  const switchHandle = await page.waitForSelector(switchSelector, { timeout: 10_000 }).catch(() => null)
+  if (!switchHandle) {
+    throw new Error("Bilibili schedule switch (.switch-container) not found")
+  }
 
-    if (!toggled) {
-      throw new Error("Bilibili schedule toggle not found")
+  const alreadyActive = await page.$eval(switchSelector, (el) =>
+    el.classList.contains("switch-container-active"),
+  ).catch(() => false)
+
+  if (!alreadyActive) {
+    await page.click(switchSelector)
+    await delay(800)
+  }
+
+  // Wait for time-picker to appear
+  await page.waitForSelector(".time-picker .date-picker-date", { timeout: 10_000 }).catch(() => null)
+
+  // Step 2: pick the date
+  await pickScheduleDate(page, schedule)
+  await delay(400)
+
+  // Step 3: pick the time (hour + minute)
+  await pickScheduleTime(page, schedule)
+  await delay(400)
+
+  // Step 4: verify values
+  await ensureScheduleValues(page, schedule)
+}
+
+async function pickScheduleDate(page: Page, schedule: ScheduleValues): Promise<void> {
+  // Read current date shown in .date-picker-date > .date-show
+  const currentDate = await page
+    .$eval(".date-picker-date .date-show", (el) => (el as HTMLElement).innerText.trim())
+    .catch(() => "")
+
+  if (currentDate === schedule.date) {
+    return
+  }
+
+  // Open the date picker
+  await page.click(".date-picker-date")
+  await delay(500)
+
+  // Navigate to the correct month using the nav buttons
+  for (let i = 0; i < MAX_MONTH_NAVIGATIONS; i++) {
+    const navTitle = await page
+      .$eval(".date-picker-nav-title", (el) => (el as HTMLElement).innerText.trim())
+      .catch(() => "")
+
+    const match = navTitle.match(/(\d+)\D+(\d+)/)
+    if (!match) break
+
+    const navYear = Number.parseInt(match[1] ?? "", 10)
+    const navMonth = Number.parseInt(match[2] ?? "", 10)
+    if (!Number.isFinite(navYear) || !Number.isFinite(navMonth)) break
+
+    if (navYear === schedule.year && navMonth === schedule.month) {
+      break
     }
 
-    await delay(800)
-    inputs = await waitForScheduleInputs(page, 10_000)
+    const target = schedule.year * 12 + schedule.month
+    const current = navYear * 12 + navMonth
+    const forward = target > current
+
+    const clicked = await clickMonthNav(page, forward)
+    if (!clicked) {
+      throw new Error(`Failed to navigate Bilibili schedule date picker to ${schedule.year}-${schedule.month}`)
+    }
+    await delay(300)
   }
 
-  const filled = await fillScheduleInputs(page, schedule)
-  if (!filled) {
-    const hints = inputs.hints.length > 0 ? inputs.hints.join(" | ") : "none"
-    throw new Error(`Bilibili schedule input not found. hints=${hints}`)
+  // Click the day cell
+  const dayClicked = await page.evaluate((day) => {
+    const items = Array.from(document.querySelectorAll(".date-wrp .date-picker-body-item")) as HTMLElement[]
+    for (const item of items) {
+      if (item.classList.contains("date-item-disabled")) continue
+      const text = item.innerText?.trim() ?? ""
+      if (text === String(day)) {
+        item.click()
+        return true
+      }
+    }
+    return false
+  }, schedule.day)
+
+  if (!dayClicked) {
+    throw new Error(
+      `Bilibili schedule day ${schedule.day} not selectable (may be disabled or outside the 15-day window)`,
+    )
   }
 
-  const confirmed = await clickByTexts(page, SCHEDULE_CONFIRM_TEXTS, true)
-  if (confirmed) {
-    await delay(500)
+  await delay(500)
+}
+
+async function clickMonthNav(page: Page, forward: boolean): Promise<boolean> {
+  return page.evaluate((goForward) => {
+    const nav = document.querySelector(".date-picker-nav-wrp") as HTMLElement | null
+    if (!nav) return false
+
+    // Nav bar has arrow SVGs: two prev arrows on the left, title, two next arrows on the right.
+    // Use the inner (single-step) arrows: index 1 (prev month) / index 2 (next month).
+    const svgs = Array.from(nav.querySelectorAll("svg")) as SVGElement[]
+    if (svgs.length < 4) return false
+
+    const targetSvg = goForward ? svgs[2] : svgs[1]
+    if (!targetSvg) return false
+
+    // Dispatch click on the svg's clickable ancestor (often itself or parent)
+    const clickable = (targetSvg.closest("svg, button, [class*='nav']") as HTMLElement) ?? targetSvg
+    ;(clickable as unknown as HTMLElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    )
+    return true
+  }, forward)
+}
+
+async function pickScheduleTime(page: Page, schedule: ScheduleValues): Promise<void> {
+  // Read current time shown
+  const currentTime = await page
+    .$eval(".date-picker-timer .date-show", (el) => (el as HTMLElement).innerText.trim())
+    .catch(() => "")
+
+  if (currentTime === schedule.time) {
+    return
   }
 
-  await ensureScheduleValues(page, schedule)
+  // Open the time picker
+  await page.click(".date-picker-timer")
+  await delay(500)
+
+  const hourStr = String(schedule.hour).padStart(2, "0")
+  const minuteStr = String(schedule.minute).padStart(2, "0")
+
+  // Bilibili's minute panel only enables minutes >= current-time-constraint
+  // based on the currently active hour. We must click hour FIRST, let the
+  // minute panel re-render, then click minute.
+  const hourResult = await page.evaluate((target) => {
+    const panels = Array.from(
+      document.querySelectorAll(".time-picker-body-wrp .time-picker-panel-select-wrp"),
+    ) as HTMLElement[]
+    if (panels.length < 2) return { found: false, reason: "panels<2" }
+
+    const items = Array.from(
+      panels[0]!.querySelectorAll("span.time-picker-panel-select-item"),
+    ) as HTMLElement[]
+    for (const item of items) {
+      if (item.classList.contains("time-select-disabled")) continue
+      if ((item.innerText ?? "").trim() === target) {
+        item.click()
+        return { found: true }
+      }
+    }
+    return { found: false, reason: "hour not enabled" }
+  }, hourStr)
+
+  if (!hourResult.found) {
+    throw new Error(`Bilibili schedule hour ${hourStr} not selectable (may be disabled)`)
+  }
+
+  // Wait for the minute panel to re-render with updated disabled state
+  await delay(400)
+
+  const minuteResult = await page.evaluate((target) => {
+    const panels = Array.from(
+      document.querySelectorAll(".time-picker-body-wrp .time-picker-panel-select-wrp"),
+    ) as HTMLElement[]
+    if (panels.length < 2) return { found: false, reason: "panels<2" }
+
+    const items = Array.from(
+      panels[1]!.querySelectorAll("span.time-picker-panel-select-item"),
+    ) as HTMLElement[]
+    const enabledList: string[] = []
+    for (const item of items) {
+      const text = (item.innerText ?? "").trim()
+      if (!item.classList.contains("time-select-disabled")) {
+        enabledList.push(text)
+      }
+      if (item.classList.contains("time-select-disabled")) continue
+      if (text === target) {
+        item.click()
+        return { found: true }
+      }
+    }
+    return { found: false, reason: "minute not enabled", enabled: enabledList }
+  }, minuteStr)
+
+  if (!minuteResult.found) {
+    throw new Error(
+      `Bilibili schedule minute ${minuteStr} not selectable. Bilibili only allows 5-minute steps (00,05,10,...). Enabled: ${JSON.stringify(
+        (minuteResult as { enabled?: string[] }).enabled ?? [],
+      )}`,
+    )
+  }
+
+  // Close the time picker by clicking somewhere neutral
+  await delay(300)
+  await page.evaluate(() => {
+    (document.querySelector(".section-title-content-main") as HTMLElement | null)?.click()
+  })
+  await delay(300)
 }
 
 async function waitForFileInput(
@@ -513,199 +776,50 @@ function containsAny(text: string, needles: readonly string[]): boolean {
   return needles.some((needle) => text.includes(needle))
 }
 
-function hasMarkedScheduleInputs(inputs: MarkedScheduleInputs): boolean {
-  return inputs.combined || inputs.date || inputs.time
-}
-
 function parseScheduleAt(isoDate: string): ScheduleValues {
   const d = new Date(isoDate)
   if (Number.isNaN(d.getTime())) {
     throw new Error(`scheduleAt is not a valid ISO 8601 date: ${isoDate}`)
   }
 
-  if (d.getTime() <= Date.now()) {
-    throw new Error(`scheduleAt must be in the future. Got: ${isoDate}`)
+  if (d.getTime() <= Date.now() + 5 * 60_000) {
+    throw new Error(
+      `scheduleAt must be at least 5 minutes in the future (Bilibili requirement). Got: ${isoDate}`,
+    )
   }
 
+  if (d.getMinutes() % 5 !== 0) {
+    throw new Error(
+      `scheduleAt minute must be a multiple of 5 (Bilibili only allows 5-minute steps). Got: ${isoDate}`,
+    )
+  }
+
+  const year = d.getFullYear()
+  const month = d.getMonth() + 1
+  const day = d.getDate()
+  const hour = d.getHours()
+  const minute = d.getMinutes()
+
   const date = [
-    d.getFullYear(),
-    String(d.getMonth() + 1).padStart(2, "0"),
-    String(d.getDate()).padStart(2, "0"),
+    year,
+    String(month).padStart(2, "0"),
+    String(day).padStart(2, "0"),
   ].join("-")
   const time = [
-    String(d.getHours()).padStart(2, "0"),
-    String(d.getMinutes()).padStart(2, "0"),
+    String(hour).padStart(2, "0"),
+    String(minute).padStart(2, "0"),
   ].join(":")
 
   return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
     date,
     time,
     dateTime: `${date} ${time}`,
   }
-}
-
-async function waitForScheduleInputs(
-  page: Page,
-  timeoutMs: number,
-): Promise<MarkedScheduleInputs> {
-  const deadline = Date.now() + timeoutMs
-  let last = await markScheduleInputs(page)
-
-  while (Date.now() < deadline) {
-    if (hasMarkedScheduleInputs(last)) {
-      return last
-    }
-
-    await delay(300)
-    last = await markScheduleInputs(page)
-  }
-
-  return last
-}
-
-async function markScheduleInputs(page: Page): Promise<MarkedScheduleInputs> {
-  return page.evaluate(
-    ({ markerAttr, selectors }) => {
-      const isVisible = (element: Element): boolean => {
-        const htmlElement = element as HTMLElement
-        const style = window.getComputedStyle(htmlElement)
-        const rect = htmlElement.getBoundingClientRect()
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          rect.width > 0 &&
-          rect.height > 0
-        )
-      }
-
-      document
-        .querySelectorAll(`input[${markerAttr}]`)
-        .forEach((element) => element.removeAttribute(markerAttr))
-
-      const candidates = Array.from(document.querySelectorAll("input"))
-        .filter((element): element is HTMLInputElement =>
-          element instanceof HTMLInputElement && !element.disabled && isVisible(element),
-        )
-        .map((input) => {
-          const rect = input.getBoundingClientRect()
-          const selectorMatch = selectors.some((selector) => {
-            try {
-              return input.matches(selector)
-            } catch {
-              return false
-            }
-          })
-          const hint = [
-            input.placeholder,
-            input.getAttribute("aria-label") ?? "",
-            input.name,
-            input.id,
-            input.className,
-            input.parentElement?.textContent ?? "",
-          ]
-            .join(" ")
-            .replace(/\s+/g, " ")
-            .trim()
-
-          return {
-            input,
-            hint,
-            top: rect.top,
-            left: rect.left,
-            selectorMatch,
-          }
-        })
-        .filter(
-          ({ hint, selectorMatch }) =>
-            selectorMatch || /时间|日期|发布|预约|定时|date|time|schedule/i.test(hint),
-        )
-        .sort((left, right) => {
-          if (left.top !== right.top) return left.top - right.top
-          return left.left - right.left
-        })
-
-      const combinedCandidate =
-        candidates.find(({ hint }) =>
-          /发布时间|日期时间|日期和时间|选择日期时间|schedule/i.test(hint),
-        ) ?? null
-
-      const dateCandidate =
-        candidates.find(({ hint }) => /日期|date/i.test(hint) && !/时间|time/i.test(hint)) ??
-        null
-
-      const timeCandidate =
-        candidates.find(({ hint }) => /时间|time/i.test(hint) && !/日期|date/i.test(hint)) ??
-        null
-
-      if (dateCandidate && timeCandidate && dateCandidate.input !== timeCandidate.input) {
-        dateCandidate.input.setAttribute(markerAttr, "date")
-        timeCandidate.input.setAttribute(markerAttr, "time")
-      } else if (combinedCandidate) {
-        combinedCandidate.input.setAttribute(markerAttr, "combined")
-      } else if (candidates.length >= 2) {
-        candidates[0]?.input.setAttribute(markerAttr, "date")
-        candidates[1]?.input.setAttribute(markerAttr, "time")
-      } else if (candidates[0]) {
-        candidates[0].input.setAttribute(markerAttr, "combined")
-      }
-
-      return {
-        combined: Boolean(document.querySelector(`input[${markerAttr}='combined']`)),
-        date: Boolean(document.querySelector(`input[${markerAttr}='date']`)),
-        time: Boolean(document.querySelector(`input[${markerAttr}='time']`)),
-        hints: candidates.map(({ hint }) => hint.slice(0, 120)).slice(0, 5),
-      }
-    },
-    {
-      markerAttr: SCHEDULE_INPUT_MARKER_ATTR,
-      selectors: [...SCHEDULE_INPUT_SELECTORS],
-    },
-  )
-}
-
-async function fillScheduleInputs(
-  page: Page,
-  schedule: ScheduleValues,
-): Promise<boolean> {
-  const marked = await markScheduleInputs(page)
-
-  if (marked.combined) {
-    return fillMarkedScheduleInput(page, "combined", schedule.dateTime)
-  }
-
-  let filled = false
-  if (marked.date) {
-    filled = (await fillMarkedScheduleInput(page, "date", schedule.date)) || filled
-  }
-  if (marked.time) {
-    filled = (await fillMarkedScheduleInput(page, "time", schedule.time)) || filled
-  }
-
-  return filled
-}
-
-async function fillMarkedScheduleInput(
-  page: Page,
-  target: "combined" | "date" | "time",
-  value: string,
-): Promise<boolean> {
-  const selector = `input[${SCHEDULE_INPUT_MARKER_ATTR}='${target}']`
-  const handle = (await page.$(selector)) as ElementHandle<HTMLInputElement> | null
-  if (!handle) {
-    return false
-  }
-
-  await handle.click({ clickCount: 3 }).catch(async () => {
-    await page.focus(selector).catch(() => {})
-  })
-  await page.focus(selector).catch(() => {})
-  await selectAllAndDelete(page)
-  await page.keyboard.type(value, { delay: 20 })
-  await delay(300)
-  await page.keyboard.press("Enter").catch(() => {})
-  await delay(300)
-  await handle.dispose().catch(() => {})
-  return true
 }
 
 async function ensureScheduleValues(
@@ -713,57 +827,36 @@ async function ensureScheduleValues(
   schedule: ScheduleValues,
 ): Promise<void> {
   const deadline = Date.now() + SCHEDULE_VERIFY_TIMEOUT_MS
-  let lastValues = ""
 
   while (Date.now() < deadline) {
-    await markScheduleInputs(page)
+    const [dateShown, timeShown] = await page.evaluate(() => {
+      const dateEl = document.querySelector(".date-picker-date .date-show") as HTMLElement | null
+      const timeEl = document.querySelector(".date-picker-timer .date-show") as HTMLElement | null
+      return [
+        dateEl?.innerText?.trim() ?? "",
+        timeEl?.innerText?.trim() ?? "",
+      ]
+    })
 
-    const [combined, date, time] = await Promise.all([
-      readMarkedScheduleInputValue(page, "combined"),
-      readMarkedScheduleInputValue(page, "date"),
-      readMarkedScheduleInputValue(page, "time"),
-    ])
-
-    const normalizedCombined = normalizeScheduleValue(combined)
-    const normalizedDate = normalizeScheduleValue(date)
-    const normalizedTime = normalizeScheduleValue(time)
-
-    lastValues = [combined, date, time].filter(Boolean).join(" | ")
-
-    if (
-      (normalizedCombined &&
-        normalizedCombined.includes(schedule.date) &&
-        normalizedCombined.includes(schedule.time)) ||
-      (normalizedDate.includes(schedule.date) && normalizedTime.includes(schedule.time))
-    ) {
+    if (dateShown === schedule.date && timeShown === schedule.time) {
       return
     }
 
     await delay(300)
   }
 
+  const [dateShown, timeShown] = await page.evaluate(() => {
+    const dateEl = document.querySelector(".date-picker-date .date-show") as HTMLElement | null
+    const timeEl = document.querySelector(".date-picker-timer .date-show") as HTMLElement | null
+    return [
+      dateEl?.innerText?.trim() ?? "",
+      timeEl?.innerText?.trim() ?? "",
+    ]
+  })
+
   throw new Error(
-    `Failed to confirm Bilibili schedule value. expected=${schedule.dateTime} actual=${lastValues || "unavailable"}`,
+    `Failed to confirm Bilibili schedule value. expected=${schedule.dateTime} actual=${dateShown} ${timeShown}`,
   )
-}
-
-async function readMarkedScheduleInputValue(
-  page: Page,
-  target: "combined" | "date" | "time",
-): Promise<string> {
-  const selector = `input[${SCHEDULE_INPUT_MARKER_ATTR}='${target}']`
-  return page
-    .$eval(selector, (element) => {
-      if (!(element instanceof HTMLInputElement)) {
-        return ""
-      }
-      return element.value ?? ""
-    })
-    .catch(() => "")
-}
-
-function normalizeScheduleValue(value: string): string {
-  return value.replace(/[/.]/g, "-").replace(/\s+/g, " ").trim()
 }
 
 async function selectAllAndDelete(page: Page): Promise<void> {

@@ -117,7 +117,6 @@ export const SCHEDULE_CONFIRM_TEXTS = [
 export const SCHEDULE_SUBMIT_BUTTON_TEXTS = [
   "确认预约",
   "预约发布",
-  "定时发布",
   "预约投稿",
   "立即投稿",
   "提交稿件",
