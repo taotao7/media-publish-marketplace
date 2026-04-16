@@ -11,8 +11,15 @@ export interface ManagedBrowser {
   readonly close: () => Promise<void>;
 }
 
-export async function launchBrowser(account: string): Promise<ManagedBrowser> {
-  const headless = process.env.XHS_HEADLESS !== "false";
+export interface LaunchBrowserOptions {
+  readonly headless?: boolean;
+}
+
+export async function launchBrowser(
+  account: string,
+  options: LaunchBrowserOptions = {},
+): Promise<ManagedBrowser> {
+  const headless = options.headless ?? (process.env.XHS_HEADLESS !== "false");
 
   const browser: Browser = (await puppeteer.launch({
     headless,

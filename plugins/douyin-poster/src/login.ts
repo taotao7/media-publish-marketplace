@@ -1,6 +1,3 @@
-import { mkdirSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
 import type { ElementHandle, Page } from "puppeteer"
 import {
   CREATOR_UPLOAD_URL,
@@ -22,7 +19,6 @@ export interface LoginStatus {
 
 export interface QrcodeResult {
   readonly alreadyLoggedIn: boolean
-  readonly path?: string
 }
 
 interface AuthSignals {
@@ -60,7 +56,7 @@ export async function detectLoginStatus(page: Page): Promise<LoginStatus> {
 
 export async function fetchQrcode(
   page: Page,
-  account: string,
+  _account: string,
 ): Promise<QrcodeResult> {
   await openCreatorUpload(page)
   const status = await detectLoginStatus(page)
@@ -69,18 +65,10 @@ export async function fetchQrcode(
   }
 
   await switchToQrcodeLogin(page)
-  const imgSrc = await waitForQrcodeSrc(page)
-
-  const qrcodeDir = join(homedir(), ".media-mcp", "douyin")
-  mkdirSync(qrcodeDir, { recursive: true })
-  const qrcodePath = join(qrcodeDir, `qrcode-${account}.png`)
-
-  const base64Data = imgSrc.replace(/^data:image\/\w+;base64,/, "")
-  writeFileSync(qrcodePath, Buffer.from(base64Data, "base64"))
+  await waitForQrcodeSrc(page)
 
   return {
     alreadyLoggedIn: false,
-    path: qrcodePath,
   }
 }
 

@@ -3,6 +3,7 @@ import type { ElementHandle, Page } from "puppeteer"
 import { detectLoginStatus } from "./login.js"
 import {
   ADD_MORE_IMAGES_BUTTON_SELECTOR,
+  ADD_MORE_IMAGES_TEXTS,
   CREATOR_UPLOAD_URL,
   DESCRIPTION_INPUT_SELECTORS,
   FILE_INPUT_SELECTORS,
@@ -22,13 +23,13 @@ import {
 const VIDEO_UPLOAD_TIMEOUT_MS = 300_000
 const IMAGE_UPLOAD_TIMEOUT_MS = 180_000
 const IMAGE_UPLOAD_STABLE_WINDOW_MS = 800
-const IMAGE_UPLOAD_NEXT_DELAY_MS = 500
+const IMAGE_SINGLE_RETRY_ATTEMPTS = 2
 const SUBMIT_READY_TIMEOUT_MS = 300_000
 const PUBLISH_RESULT_TIMEOUT_MS = 120_000
 const MAX_TITLE_LENGTH = 60
 const MAX_CONTENT_LENGTH = 1_000
 const READINESS_STABLE_POLLS = 2
-const PREPARE_RETRY_ATTEMPTS = 2
+const PREPARE_RETRY_ATTEMPTS = 3
 const PREPARE_RETRY_DELAY_MS = 2_000
 const VIDEO_READY_HINT_TEXTS = ["设置封面", "选择封面", "发布时间"] as const
 const MANAGE_PAGE_READY_TEXTS = ["作品管理", "全部作品", "已发布", "审核中"] as const
@@ -226,38 +227,11 @@ export async function publishImages(
     }
 
     // Upload first image via the initial file input (triggers page navigation)
-    const input = (await waitForFirstHandle(
-      page,
-      IMAGE_FILE_INPUT_SELECTORS,
-      30_000,
-    )) as ElementHandle<HTMLInputElement> | null
-    if (!input) throw new Error("Image file input not found")
+    await uploadFirstImageWithRetry(page, params.imagePaths[0])
 
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {}),
-      input.uploadFile(params.imagePaths[0]),
-    ])
-    await waitForImageUploadSettled(page, 1)
-
-    // Upload remaining images in one batch via "继续添加" button
+    // Upload remaining images via "继续添加" button with per-image retry
     if (params.imagePaths.length > 1) {
-      const remainingPaths = params.imagePaths.slice(1)
-
-      const addBtn = await page.$(ADD_MORE_IMAGES_BUTTON_SELECTOR)
-      if (!addBtn) {
-        throw new Error("继续添加 button not found for batch upload")
-      }
-
-      const [chooser] = await Promise.all([
-        page.waitForFileChooser({ timeout: 5_000 }),
-        addBtn.click(),
-      ])
-      await chooser.accept([...remainingPaths])
-
-      await waitForImageUploadSettled(page, params.imagePaths.length)
-      console.error(
-        `[douyin] all ${params.imagePaths.length} images uploaded`,
-      )
+      await uploadRemainingImagesWithRetry(page, params.imagePaths)
     }
 
     await selectMusic(page)
@@ -350,6 +324,149 @@ async function waitForImageUploadSettled(page: Page, expectedCount: number): Pro
     `Image upload did not settle for ${expectedCount} uploaded thumbnail(s).${status}`,
   )
 }
+
+// ── Per-image upload helpers with retry ─────────────────────────────
+
+async function uploadFirstImageWithRetry(
+  page: Page,
+  imagePath: string,
+): Promise<void> {
+  for (let attempt = 1; attempt <= IMAGE_SINGLE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const input = (await waitForFirstHandle(
+        page,
+        IMAGE_FILE_INPUT_SELECTORS,
+        30_000,
+      )) as ElementHandle<HTMLInputElement> | null
+      if (!input) throw new Error("Image file input not found")
+
+      await Promise.all([
+        page
+          .waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 })
+          .catch(() => {}),
+        input.uploadFile(imagePath),
+      ])
+      await waitForImageUploadSettled(page, 1)
+      return
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      if (attempt >= IMAGE_SINGLE_RETRY_ATTEMPTS) {
+        throw new Error(`First image upload failed after ${attempt} attempt(s): ${msg}`)
+      }
+      console.error(
+        `[douyin] first image upload attempt ${attempt} failed: ${msg}, retrying…`,
+      )
+      await delay(PREPARE_RETRY_DELAY_MS)
+    }
+  }
+}
+
+async function uploadRemainingImagesWithRetry(
+  page: Page,
+  allImagePaths: readonly string[],
+): Promise<void> {
+  const totalExpected = allImagePaths.length
+  const remainingPaths = allImagePaths.slice(1)
+
+  // Phase 1: try batch upload of all remaining images at once
+  await uploadViaAddMoreButton(page, remainingPaths)
+
+  // Check how many images actually uploaded
+  let currentCount = await countUploadedImages(page)
+  console.error(`[douyin] batch upload done, detected ${currentCount}/${totalExpected} images`)
+
+  // Phase 2: if count is short, wait a bit longer — batch may still be processing
+  if (currentCount < totalExpected) {
+    try {
+      await waitForImageUploadSettled(page, totalExpected)
+      currentCount = await countUploadedImages(page)
+    } catch {
+      currentCount = await countUploadedImages(page)
+      console.error(
+        `[douyin] batch settle incomplete: ${currentCount}/${totalExpected}, will retry missing images individually`,
+      )
+    }
+  }
+
+  // Phase 3: if still short, retry missing images one at a time
+  if (currentCount < totalExpected) {
+    const missingCount = totalExpected - currentCount
+    console.error(
+      `[douyin] ${missingCount} image(s) missing after batch upload, retrying individually`,
+    )
+
+    for (let i = 0; i < missingCount; i++) {
+      for (let attempt = 1; attempt <= IMAGE_SINGLE_RETRY_ATTEMPTS; attempt++) {
+        const beforeCount = await countUploadedImages(page)
+        if (beforeCount >= totalExpected) {
+          break
+        }
+
+        try {
+          // Pick the image from the end of the list (most likely to have failed)
+          const idx = totalExpected - missingCount + i
+          const fallbackPath = allImagePaths[idx] ?? allImagePaths[allImagePaths.length - 1]
+          console.error(
+            `[douyin] retrying image ${idx + 1}/${totalExpected} (attempt ${attempt}): ${fallbackPath}`,
+          )
+
+          await uploadViaAddMoreButton(page, [fallbackPath])
+          await waitForImageUploadSettled(page, beforeCount + 1)
+          break
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error)
+          if (attempt >= IMAGE_SINGLE_RETRY_ATTEMPTS) {
+            throw new Error(
+              `Image upload retry failed: expected ${totalExpected} images, only ${beforeCount} uploaded. Last error: ${msg}`,
+            )
+          }
+          console.error(
+            `[douyin] single image retry attempt ${attempt} failed: ${msg}, retrying…`,
+          )
+          await delay(PREPARE_RETRY_DELAY_MS)
+        }
+      }
+    }
+  }
+
+  // Final verification
+  const finalCount = await countUploadedImages(page)
+  if (finalCount < totalExpected) {
+    throw new Error(
+      `Image upload incomplete: expected ${totalExpected} images, only ${finalCount} detected after retries`,
+    )
+  }
+
+  console.error(`[douyin] all ${totalExpected} images uploaded successfully`)
+}
+
+async function uploadViaAddMoreButton(
+  page: Page,
+  imagePaths: readonly string[],
+): Promise<void> {
+  const addBtn = await page.$(ADD_MORE_IMAGES_BUTTON_SELECTOR)
+  if (!addBtn) {
+    // Fall back to text-based detection — must start file chooser listener
+    // BEFORE the click because clickByTexts runs synchronously in page context
+    const [chooser, clicked] = await Promise.all([
+      page.waitForFileChooser({ timeout: 5_000 }),
+      clickByTexts(page, [...ADD_MORE_IMAGES_TEXTS]),
+    ])
+    if (!clicked) {
+      throw new Error("继续添加 button not found for image upload")
+    }
+    await chooser.accept([...imagePaths])
+    return
+  }
+
+  const [chooser] = await Promise.all([
+    page.waitForFileChooser({ timeout: 5_000 }),
+    addBtn.click(),
+  ])
+  await chooser.accept([...imagePaths])
+}
+
+// ── Prepare retry wrapper ──────────────────────────────────────────
 
 async function withPrepareRetry(
   page: Page,
@@ -1226,18 +1343,36 @@ async function setSchedule(page: Page, isoDate: string): Promise<void> {
   }
   await delay(1_000)
 
-  // Fill date/time input
+  // Directly set the date/time value via DOM — avoid opening the date picker popup
   const input = await page.waitForSelector(SCHEDULE_INPUT_SELECTOR, { timeout: 5_000 })
   if (!input) throw new Error("Schedule date/time input not found")
 
-  await input.click({ clickCount: 3 })
-  await delay(200)
-  await page.evaluate((sel) => {
+  const valueSet = await page.evaluate((sel, value) => {
     const el = document.querySelector(sel) as HTMLInputElement | null
-    if (el) { el.value = ""; el.dispatchEvent(new Event("input", { bubbles: true })) }
-  }, SCHEDULE_INPUT_SELECTOR)
-  await input.type(formatted, { delay: 30 })
-  await page.keyboard.press("Enter")
+    if (!el) return false
+
+    // Use native setter to bypass React/Vue controlled input guards
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype, "value",
+    )?.set
+    if (nativeSetter) {
+      nativeSetter.call(el, value)
+    } else {
+      el.value = value
+    }
+
+    // Dispatch events to notify the framework of the change
+    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(new Event("change", { bubbles: true }))
+    el.dispatchEvent(new Event("blur", { bubbles: true }))
+    return true
+  }, SCHEDULE_INPUT_SELECTOR, formatted)
+
+  if (!valueSet) {
+    throw new Error("Failed to set schedule date/time value")
+  }
+
+  console.error(`[douyin] schedule set to: ${formatted}`)
   await delay(500)
 }
 

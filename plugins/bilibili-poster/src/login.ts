@@ -1,6 +1,3 @@
-import { mkdirSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
 import type { Frame, Page } from "puppeteer"
 import {
   CREATOR_READY_TEXTS,
@@ -21,7 +18,6 @@ export interface LoginStatus {
 
 export interface QrcodeResult {
   readonly alreadyLoggedIn: boolean
-  readonly path?: string
 }
 
 interface AuthSignals {
@@ -36,7 +32,7 @@ export async function checkLoginStatus(page: Page): Promise<LoginStatus> {
 
 export async function fetchQrcode(
   page: Page,
-  account: string,
+  _account: string,
 ): Promise<QrcodeResult> {
   await openCreatorUpload(page)
   const status = await detectLoginStatus(page)
@@ -44,16 +40,10 @@ export async function fetchQrcode(
     return { alreadyLoggedIn: true }
   }
 
-  const qrcodeData = await waitForQrcodeData(page)
-  const qrcodeDir = join(homedir(), ".media-mcp", "bilibili")
-  mkdirSync(qrcodeDir, { recursive: true })
-  const qrcodePath = join(qrcodeDir, `qrcode-${account}.png`)
-  const imageBuffer = await loadImageBuffer(qrcodeData)
-  writeFileSync(qrcodePath, imageBuffer)
+  await waitForQrcodeData(page)
 
   return {
     alreadyLoggedIn: false,
-    path: qrcodePath,
   }
 }
 
@@ -234,19 +224,6 @@ async function anyFrameTextIncludes(
     }
   }
   return false
-}
-
-async function loadImageBuffer(value: string): Promise<Buffer> {
-  if (value.startsWith("data:image/")) {
-    return Buffer.from(value.replace(/^data:image\/\w+;base64,/, ""), "base64")
-  }
-
-  const response = await fetch(value)
-  if (!response.ok) {
-    throw new Error(`Failed to download QR code image: ${response.status}`)
-  }
-
-  return Buffer.from(await response.arrayBuffer())
 }
 
 function delay(ms: number): Promise<void> {

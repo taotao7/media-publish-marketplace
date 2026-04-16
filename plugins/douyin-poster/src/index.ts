@@ -83,11 +83,11 @@ server.tool(
 
 server.tool(
   "get_login_qrcode",
-  "Get a QR code image for Douyin creator login. After returning the QR code, the tool polls in the background for up to 4 minutes waiting for the user to scan. Cookies are saved automatically on success.",
+  "Open a visible browser window for Douyin creator login. The tool keeps polling in the background for up to 4 minutes while the user scans the QR code in the browser. Cookies are saved automatically on success.",
   { account: accountParam },
   async ({ account }): Promise<CallToolResult> => {
     const acct = account || DEFAULT_ACCOUNT
-    const managed = await launchBrowser(acct)
+    const managed = await launchBrowser(acct, { headless: false })
 
     try {
       const result = await fetchQrcode(managed.page, acct)
@@ -121,9 +121,9 @@ server.tool(
           {
             type: "text",
             text: [
-              `QR code saved to: ${result.path}`,
-              `Account: ${acct}`,
-              `Please open this file with an image viewer (e.g. run: open "${result.path}") and scan it with the Douyin app to log in.`,
+              `Browser login window opened for account: ${acct}`,
+              "Scan the QR code directly in the opened browser window with the Douyin app.",
+              "Keep the browser window open while login is being detected.",
               "Waiting up to 4 minutes for login…",
             ].join("\n"),
           },

@@ -17,11 +17,11 @@ cd ${CLAUDE_PLUGIN_ROOT} && bun install
 
 If `bun` is not found, tell the user to install Bun first: `curl -fsSL https://bun.sh/install | bash`
 
-## Step 2: Login via QR Code
+## Step 2: Login in Browser
 
-Use the `get_login_qrcode` MCP tool to generate a QR code, then ask the user to scan it with the Douyin app. After scanning, use `check_login_status` to verify.
+Use the `get_login_qrcode` MCP tool to open a browser window, then ask the user to scan the QR code directly in that window with the Douyin app. After scanning, use `check_login_status` to verify.
 
-If `DOUYIN_HEADLESS` is set to `false`, the browser window will be visible for debugging.
+The login tool now opens a visible browser window automatically for setup and login.
 
 ## Step 3: Verify
 
@@ -30,5 +30,5 @@ Run `list_accounts` to confirm the login was saved. Then try `check_login_status
 ## Troubleshooting
 
 - **MCP server won't start**: Run `cd ${CLAUDE_PLUGIN_ROOT} && bun install` manually, check for errors.
-- **Login fails**: Set `DOUYIN_HEADLESS=false` in the plugin's mcpServers env config to see the browser and debug.
+- **Login fails**: The login flow already opens a visible browser window. If it still fails, keep the window open and inspect the page state while retrying.
 - **Custom cookie path**: Set `DOUYIN_COOKIES_PATH` env var to override the default `~/.media-mcp/douyin/` storage location.

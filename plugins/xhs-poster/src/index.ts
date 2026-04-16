@@ -1,6 +1,3 @@
-import { mkdirSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
 import { createMcpServer, z } from "./mcp.js"
 import type { CallToolResult } from "./mcp.js"
 import { launchBrowser } from "./browser.js"
@@ -8,7 +5,6 @@ import { deleteCookies, getCookiePath, listAccounts } from "./cookies.js"
 import { checkLoginStatus, fetchQrcode, waitForLogin } from "./login.js"
 import { publishContent } from "./publish.js"
 import { listNotes, listAllNotes, deleteNote, getEditUrl } from "./manage.js"
-import { qrcodeToCleanPng } from "./qrcode.js"
 
 const DEFAULT_ACCOUNT = "default"
 
@@ -88,11 +84,11 @@ server.tool(
 
 server.tool(
   "get_login_qrcode",
-  "Get a QR code image for Xiaohongshu login. After returning the QR code, the tool polls in the background for up to 4 minutes waiting for the user to scan. Cookies are saved automatically on success.",
+  "Open a visible browser window for Xiaohongshu login. The tool keeps polling in the background for up to 4 minutes while the user scans the QR code in the browser. Cookies are saved automatically on success.",
   { account: accountParam },
   async ({ account }): Promise<CallToolResult> => {
     const acct = account || DEFAULT_ACCOUNT
-    const managed = await launchBrowser(acct)
+    const managed = await launchBrowser(acct, { headless: false })
     try {
       const result = await fetchQrcode(managed.page)
 
@@ -122,31 +118,14 @@ server.tool(
         }
       })()
 
-      const base64Data = result.img!.replace(/^data:image\/\w+;base64,/, "")
-      const qrDir = join(homedir(), ".media-mcp")
-      mkdirSync(qrDir, { recursive: true })
-      const qrPath = join(qrDir, `qrcode-${acct}.png`)
-      writeFileSync(qrPath, Buffer.from(base64Data, "base64"))
-
-      let cleanBase64: string | undefined
-      try {
-        cleanBase64 = await qrcodeToCleanPng(base64Data)
-      } catch {
-        // fall back to original image
-      }
-
-      if (cleanBase64) {
-        writeFileSync(qrPath, Buffer.from(cleanBase64, "base64"))
-      }
-
       return {
         content: [
           {
             type: "text",
             text: [
-              `QR code saved to: ${qrPath}`,
-              `Account: ${acct}`,
-              `Please open this file with an image viewer (e.g. run: open "${qrPath}") and scan it with the Xiaohongshu app to log in.`,
+              `Browser login window opened for account: ${acct}`,
+              "Scan the QR code directly in the opened browser window with the Xiaohongshu app.",
+              "Keep the browser window open while login is being detected.",
               `Waiting up to 4 minutes for login…`,
             ].join("\n"),
           },

@@ -10,7 +10,6 @@ export interface LoginStatus {
 
 export interface QrcodeResult {
   readonly alreadyLoggedIn: boolean
-  readonly img?: string
 }
 
 export async function checkLoginStatus(page: Page): Promise<LoginStatus> {
@@ -30,15 +29,8 @@ export async function fetchQrcode(page: Page): Promise<QrcodeResult> {
   }
 
   await page.waitForSelector(QRCODE_IMG, { timeout: 15_000 })
-  const img = await page.$eval(QRCODE_IMG, (el) =>
-    el.getAttribute("src"),
-  )
 
-  if (!img) {
-    throw new Error("QR code image src not found")
-  }
-
-  return { alreadyLoggedIn: false, img }
+  return { alreadyLoggedIn: false }
 }
 
 export async function waitForLogin(
@@ -60,7 +52,11 @@ export async function waitForLogin(
 // ── helpers ──────────────────────────────────────────────────────────
 
 async function elementExists(page: Page, selector: string): Promise<boolean> {
-  return (await page.$(selector)) !== null
+  try {
+    return (await page.$(selector)) !== null
+  } catch {
+    return false
+  }
 }
 
 function delay(ms: number): Promise<void> {

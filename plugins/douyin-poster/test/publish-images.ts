@@ -9,7 +9,16 @@ import { launchBrowser } from "../src/browser.js"
 import { publishImages } from "../src/publish.js"
 
 const TEST_IMAGES = [
-  process.env.DOUYIN_IMAGE_PATH ?? "/Users/tao/Pictures/wallhaven-qdyxlq.jpg",
+  "/Users/tao/Pictures/wallhaven-qdyxlq.jpg",
+  "/Users/tao/Pictures/wallhaven-qr6z7d.jpg",
+  "/Users/tao/Pictures/wallhaven-dgd1em.jpg",
+  "/Users/tao/Pictures/wallhaven-eyz51o.jpg",
+  "/Users/tao/Pictures/wallhaven-6lkdmq.jpg",
+  "/Users/tao/Pictures/wallhaven-zy6g2v.jpg",
+  "/Users/tao/Pictures/gruv-sushi-streets.jpg",
+  "/Users/tao/Pictures/aj-robbie-BuQ1RZckYW4.jpg",
+  "/Users/tao/Pictures/wallhaven-431zx6.png",
+  "/Users/tao/Pictures/wallhaven-x6elml.png",
 ]
 const SCHEDULE_MINUTES = Number(process.env.DOUYIN_SCHEDULE_MINUTES ?? "180")
 const scheduleAt = new Date(Date.now() + SCHEDULE_MINUTES * 60 * 1000).toISOString()

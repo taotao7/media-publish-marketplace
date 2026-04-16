@@ -15,8 +15,15 @@ export interface ManagedBrowser {
   readonly close: () => Promise<void>
 }
 
-export async function launchBrowser(account: string): Promise<ManagedBrowser> {
-  const headless = process.env.DOUYIN_HEADLESS !== "false"
+export interface LaunchBrowserOptions {
+  readonly headless?: boolean
+}
+
+export async function launchBrowser(
+  account: string,
+  options: LaunchBrowserOptions = {},
+): Promise<ManagedBrowser> {
+  const headless = options.headless ?? (process.env.DOUYIN_HEADLESS !== "false")
   const executablePath = resolveExecutablePath()
 
   const browser = (await puppeteer.launch({

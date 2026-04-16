@@ -17,8 +17,7 @@ try {
     process.exit(0)
   }
 
-  console.error(`[test] QR code saved to: ${result.path}`)
-  console.error(`[test] open with: open "${result.path}"`)
+  console.error('[test] browser login window opened; scan the QR code in the browser')
 
   const success = await waitForLogin(managed.page)
   if (success) {
