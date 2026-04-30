@@ -5,6 +5,8 @@ import { loadCookies, saveCookies } from "./cookies.js";
 
 puppeteer.use(StealthPlugin());
 
+const XHS_TIMEZONE = process.env.XHS_TIMEZONE || "Asia/Shanghai";
+
 export interface ManagedBrowser {
   readonly page: Page;
   readonly saveCookies: () => Promise<void>;
@@ -28,6 +30,7 @@ export async function launchBrowser(
 
   const page: Page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 800 });
+  await page.emulateTimezone(XHS_TIMEZONE);
 
   const cookies = await loadCookies(account);
   if (cookies.length > 0) {
