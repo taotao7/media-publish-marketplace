@@ -13,7 +13,6 @@ import {
   CONTENT_LENGTH_ERROR,
   TOPIC_CONTAINER,
   TOPIC_ITEM,
-  SCHEDULE_SWITCH,
   DATE_PICKER_INPUT,
   DATE_PICKER_CONTENT,
   PUBLISH_BTN,
@@ -28,11 +27,13 @@ const IMAGE_UPLOAD_TIMEOUT_MS = 60_000
 const MAX_TAGS = 10
 const XHS_TIMEZONE = process.env.XHS_TIMEZONE || "Asia/Shanghai"
 const SCHEDULE_POPOVER = ".post-time-date-picker-popover-class"
+const SCHEDULE_ROW = ".post-time-wrapper"
 const DATE_PICKER_HEADER = ".d-datepicker-header"
 const DATE_PICKER_HEADER_ICON = ".d-icon.d-clickable"
 const DATE_PICKER_CELL = ".d-datepicker-dates .d-datepicker-cell.d-clickable"
 const TIME_PICKER_BAR = ".d-timepicker-timebar"
 const TIME_PICKER_OPTION = ".d-timepicker-time"
+const PUBLISH_OUTCOME_TIMEOUT_MS = 45_000
 
 export interface PublishParams {
   readonly title: string
@@ -347,194 +348,372 @@ async function fillTags(
 
 async function setSchedule(page: Page, isoDate: string): Promise<void> {
   const schedule = formatScheduleInXhsTimezone(isoDate)
-  const toggle = await page.waitForSelector(SCHEDULE_SWITCH, { timeout: 5000 })
-  if (!toggle) throw new Error("Schedule switch not found")
-  if (!(await isScheduleEnabled(page))) {
-    await toggle.click()
-    await delay(1000)
+  await ensureScheduleEnabled(page)
+  await clickPoint(page, await getDatePickerPoint(page))
+  await waitForVisibleSelector(page, SCHEDULE_POPOVER, 5000)
+
+  for (let i = 0; i < 18; i++) {
+    const current = await getVisiblePickerMonth(page)
+    if (current.year === schedule.year && current.month === schedule.month) break
+    const delta = (schedule.year - current.year) * 12 + (schedule.month - current.month)
+    await clickPoint(page, await getPickerMonthNavPoint(page, delta > 0 ? "next" : "prev"))
+    await delay(250)
   }
 
-  const pickerContent = await page.waitForSelector(DATE_PICKER_CONTENT, {
-    timeout: 5000,
-  })
-  if (!pickerContent) throw new Error("Date picker content not found")
-  await pickerContent.click()
-  await page.waitForSelector(SCHEDULE_POPOVER, { visible: true, timeout: 5000 })
-
-  const result = await page.evaluate(
-    async ({
-      popoverSelector,
-      headerSelector,
-      headerIconSelector,
-      dateCellSelector,
-      timeBarSelector,
-      timeOptionSelector,
-      year,
-      month,
-      day,
-      hour,
-      minute,
-    }) => {
-      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-      const clickElement = (el: Element) => {
-        for (const type of ["mousedown", "mouseup", "click"]) {
-          el.dispatchEvent(
-            new MouseEvent(type, { bubbles: true, cancelable: true, view: window }),
-          )
-        }
-      }
-      const popover = document.querySelector(popoverSelector)
-      if (!popover) return { ok: false, reason: "Schedule date picker not found" }
-
-      const currentMonth = () => {
-        const text =
-          popover
-            .querySelector(".d-datepicker-header-main")
-            ?.textContent?.replace(/\s+/g, "") ?? ""
-        const match = text.match(/(\d{4})年(\d{1,2})月/)
-        if (!match) return null
-        return { year: Number(match[1]), month: Number(match[2]) }
-      }
-
-      for (let i = 0; i < 18; i++) {
-        const current = currentMonth()
-        if (!current) return { ok: false, reason: "Cannot read date picker month" }
-        if (current.year === year && current.month === month) break
-
-        const delta = (year - current.year) * 12 + (month - current.month)
-        const header = popover.querySelector(headerSelector)
-        const icons = Array.from(header?.querySelectorAll(headerIconSelector) ?? [])
-          .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
-        const monthButton = delta > 0 ? icons[2] : icons[1]
-        if (!monthButton) {
-          return { ok: false, reason: "Date picker month navigation not found" }
-        }
-        clickElement(monthButton)
-        await wait(250)
-      }
-
-      const current = currentMonth()
-      if (!current || current.year !== year || current.month !== month) {
-        return { ok: false, reason: `Cannot navigate to ${year}-${month}` }
-      }
-
-      const dateCells = Array.from(popover.querySelectorAll(dateCellSelector))
-        .filter((el) => !el.className.toString().includes("disabled"))
-      const dateCell = dateCells.find(
-        (el) => (el.textContent ?? "").trim() === String(day),
-      )
-      if (!dateCell) {
-        return { ok: false, reason: `Date cell not found: ${day}` }
-      }
-      clickElement(dateCell)
-      await wait(250)
-
-      const bars = Array.from(popover.querySelectorAll(timeBarSelector))
-      if (bars.length < 2) {
-        return { ok: false, reason: "Time picker columns not found" }
-      }
-
-      const clickTime = async (
-        bar: Element,
-        value: number,
-        suffix: "时" | "分",
-      ): Promise<string | null> => {
-        const expected = String(value).padStart(2, "0")
-        const options = Array.from(bar.querySelectorAll(timeOptionSelector))
-        const option = options.find((el) => {
-          const text = (el.textContent ?? "").replace(suffix, "").trim()
-          return text === expected
-        })
-        if (!option) return `${expected}${suffix} not found`
-        option.scrollIntoView({ block: "center" })
-        await wait(100)
-        clickElement(option)
-        await wait(250)
-        return null
-      }
-
-      const hourError = await clickTime(bars[0], hour, "时")
-      if (hourError) return { ok: false, reason: hourError }
-      const minuteError = await clickTime(bars[1], minute, "分")
-      if (minuteError) return { ok: false, reason: minuteError }
-
-      return { ok: true }
-    },
-    {
-      popoverSelector: SCHEDULE_POPOVER,
-      headerSelector: DATE_PICKER_HEADER,
-      headerIconSelector: DATE_PICKER_HEADER_ICON,
-      dateCellSelector: DATE_PICKER_CELL,
-      timeBarSelector: TIME_PICKER_BAR,
-      timeOptionSelector: TIME_PICKER_OPTION,
-      year: schedule.year,
-      month: schedule.month,
-      day: schedule.day,
-      hour: schedule.hour,
-      minute: schedule.minute,
-    },
-  )
-
-  if (!result.ok) {
-    throw new Error(`Failed to set schedule: ${result.reason}`)
+  const current = await getVisiblePickerMonth(page)
+  if (current.year !== schedule.year || current.month !== schedule.month) {
+    throw new Error(`Cannot navigate to ${schedule.year}-${schedule.month}`)
   }
 
-  await page
-    .waitForFunction(
-      (inputSelector, switchSelector, publishButtonSelector, expected) => {
-        const input = document.querySelector(inputSelector) as HTMLInputElement | null
-        const checked = Boolean(
-          (
-            document.querySelector(`${switchSelector} input[type="checkbox"]`) as
-              | HTMLInputElement
-              | null
-          )?.checked,
-        )
-        const publishButton = document.querySelector(publishButtonSelector)
-        return (
-          input?.value === expected &&
-          checked &&
-          publishButton?.textContent?.includes("定时发布")
-        )
-      },
-      { timeout: 5000 },
-      DATE_PICKER_INPUT,
-      SCHEDULE_SWITCH,
-      PUBLISH_BTN,
-      schedule.formatted,
-    )
-    .catch(async () => {
-      const state = await page.evaluate(
-        (inputSelector, switchSelector, publishButtonSelector) => {
-          const input = document.querySelector(inputSelector) as HTMLInputElement | null
-          const checkbox = document.querySelector(
-            `${switchSelector} input[type="checkbox"]`,
-          ) as HTMLInputElement | null
-          const publishButton = document.querySelector(publishButtonSelector)
-          return {
-            inputValue: input?.value ?? null,
-            checked: checkbox?.checked ?? false,
-            publishText: publishButton?.textContent?.trim() ?? null,
-          }
-        },
-        DATE_PICKER_INPUT,
-        SCHEDULE_SWITCH,
-        PUBLISH_BTN,
-      )
-      throw new Error(
-        `Schedule did not stick. Expected ${schedule.formatted}, got ${JSON.stringify(state)}`,
-      )
-    })
-
+  const currentInputValue = await getScheduleInputValue(page)
+  if (!currentInputValue?.startsWith(schedule.formatted.slice(0, 10))) {
+    await clickPoint(page, await getDateCellPoint(page, schedule.day))
+    await delay(250)
+  }
+  await clickPoint(page, await getTimeOptionPoint(page, 0, schedule.hour, "时"))
+  await delay(250)
+  await clickPoint(page, await getTimeOptionPoint(page, 1, schedule.minute, "分"))
+  await assertScheduleStuck(page, schedule.formatted)
   await delay(500)
 }
 
 async function isScheduleEnabled(page: Page): Promise<boolean> {
-  return page
-    .$eval(SCHEDULE_SWITCH, (el) =>
-      Boolean((el.querySelector('input[type="checkbox"]') as HTMLInputElement | null)?.checked),
-    )
-    .catch(() => false)
+  const state = await getScheduleState(page)
+  return state.checked
+}
+
+interface PagePoint {
+  readonly x: number
+  readonly y: number
+}
+
+interface PickerMonth {
+  readonly year: number
+  readonly month: number
+}
+
+interface ScheduleDomState {
+  readonly checked: boolean
+  readonly inputValue: string | null
+  readonly hasVisibleDateInput: boolean
+  readonly publishText: string | null
+}
+
+async function ensureScheduleEnabled(page: Page): Promise<void> {
+  if (await isScheduleEnabled(page)) return
+
+  await clickScheduleCheckbox(page)
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    const state = await getScheduleState(page)
+    if (state.checked && state.hasVisibleDateInput) return
+    await delay(250)
+  }
+
+  throw new Error(
+    `Schedule switch did not turn on: ${JSON.stringify(await getScheduleState(page))}`,
+  )
+}
+
+async function clickScheduleCheckbox(page: Page): Promise<void> {
+  const clicked = await page.evaluate(() => {
+    const wrapper = document.querySelector(".post-time-wrapper")
+    if (!wrapper) return false
+    wrapper.scrollIntoView({ block: "center" })
+    const input = wrapper.querySelector('input[type="checkbox"]') as
+      | HTMLInputElement
+      | null
+    if (!input) return false
+    if (!input.checked) input.click()
+    return true
+  })
+  if (!clicked) {
+    throw new Error("Schedule checkbox not found")
+  }
+  await delay(500)
+}
+
+async function getScheduleState(page: Page): Promise<ScheduleDomState> {
+  return page.evaluate(
+    ({ inputSelector, publishButtonSelector }) => {
+      const isVisible = (el: Element | null): boolean => {
+        if (!el) return false
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.opacity !== "0"
+        )
+      }
+      const label = findScheduleLabel()
+      const switchEl = closestSwitchTo(label)
+      const checkbox = switchEl?.querySelector('input[type="checkbox"]') as
+        | HTMLInputElement
+        | null
+      const switchChecked = Boolean(
+        switchEl
+          ?.querySelector(".d-switch-simulator")
+          ?.classList.contains("checked"),
+      )
+      const visibleInput = Array.from(document.querySelectorAll(inputSelector))
+        .find(isVisible) as HTMLInputElement | undefined
+      const publishButton = Array.from(document.querySelectorAll(publishButtonSelector))
+        .find(isVisible)
+      return {
+        checked: Boolean(checkbox?.checked || switchChecked || visibleInput),
+        inputValue: visibleInput?.value ?? null,
+        hasVisibleDateInput: Boolean(visibleInput),
+        publishText: publishButton?.textContent?.trim() ?? null,
+      }
+
+      function findScheduleLabel(): Element | null {
+        const candidates = Array.from(document.querySelectorAll("span, div, label"))
+        return candidates.find((el) => (el.textContent ?? "").trim() === "定时发布") ?? null
+      }
+      function closestSwitchTo(label: Element | null): Element | null {
+        if (!label) return null
+        const labelRect = label.getBoundingClientRect()
+        const labelY = labelRect.top + labelRect.height / 2
+        const switches = Array.from(document.querySelectorAll(".d-switch, [class*='switch']"))
+          .filter((el) => {
+            const rect = el.getBoundingClientRect()
+            return rect.width > 0 && rect.height > 0
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect()
+            const br = b.getBoundingClientRect()
+            const ay = ar.top + ar.height / 2
+            const by = br.top + br.height / 2
+            return Math.abs(ay - labelY) - Math.abs(by - labelY)
+          })
+        return switches[0] ?? null
+      }
+    },
+    {
+      inputSelector: DATE_PICKER_INPUT,
+      publishButtonSelector: PUBLISH_BTN,
+    },
+  )
+}
+
+async function getDatePickerPoint(page: Page): Promise<PagePoint> {
+  return getPoint(page, ({ contentSelector, inputSelector }) => {
+    document.querySelector(".post-time-wrapper")?.scrollIntoView({ block: "center" })
+    const isVisible = (el: Element | null): boolean => {
+      if (!el) return false
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    const label = findScheduleLabel()
+    const labelY = label ? centerY(label) : null
+    const targets = [
+      ...Array.from(document.querySelectorAll(contentSelector)),
+      ...Array.from(document.querySelectorAll(inputSelector)),
+    ].filter(isVisible)
+    const target = labelY === null
+      ? targets[0]
+      : targets.sort((a, b) => Math.abs(centerY(a) - labelY) - Math.abs(centerY(b) - labelY))[0]
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+
+    function findScheduleLabel(): Element | null {
+      const candidates = Array.from(document.querySelectorAll("span, div, label"))
+      return candidates.find((el) => (el.textContent ?? "").trim() === "定时发布") ?? null
+    }
+    function centerY(el: Element): number {
+      const rect = el.getBoundingClientRect()
+      return rect.top + rect.height / 2
+    }
+  }, { contentSelector: DATE_PICKER_CONTENT, inputSelector: DATE_PICKER_INPUT }, "date picker")
+}
+
+async function getVisiblePickerMonth(page: Page): Promise<PickerMonth> {
+  return page.evaluate((popoverSelector) => {
+    const popover = visibleElement(popoverSelector)
+    const text =
+      popover
+        ?.querySelector(".d-datepicker-header-main")
+        ?.textContent?.replace(/\s+/g, "") ?? ""
+    const match = text.match(/(\d{4})年(\d{1,2})月/)
+    if (!match) throw new Error(`Cannot read date picker month: ${text}`)
+    return { year: Number(match[1]), month: Number(match[2]) }
+
+    function visibleElement(selector: string): Element | null {
+      const candidates = Array.from(document.querySelectorAll(selector))
+      return candidates.find((el) => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+      }) ?? null
+    }
+  }, SCHEDULE_POPOVER)
+}
+
+async function getPickerMonthNavPoint(
+  page: Page,
+  direction: "next" | "prev",
+): Promise<PagePoint> {
+  return getPoint(page, ({ popoverSelector, headerSelector, iconSelector, direction }) => {
+    const popover = visibleElement(popoverSelector)
+    const header = popover?.querySelector(headerSelector)
+    const icons = (Array.from(header?.querySelectorAll(iconSelector) ?? []) as Element[])
+      .filter(isVisible)
+      .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+    const index =
+      direction === "next"
+        ? icons.length >= 4 ? 2 : icons.length - 1
+        : icons.length >= 4 ? 1 : 0
+    const target = icons[index]
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+
+    function isVisible(el: Element): boolean {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    function visibleElement(selector: string): Element | null {
+      return Array.from(document.querySelectorAll(selector)).find(isVisible) ?? null
+    }
+  }, {
+    popoverSelector: SCHEDULE_POPOVER,
+    headerSelector: DATE_PICKER_HEADER,
+    iconSelector: DATE_PICKER_HEADER_ICON,
+    direction,
+  }, `month ${direction}`)
+}
+
+async function getDateCellPoint(page: Page, day: number): Promise<PagePoint> {
+  return getPoint(page, ({ popoverSelector, cellSelector, day }) => {
+    const popover = visibleElement(popoverSelector)
+    if (!popover) return null
+    const cells = Array.from(popover.querySelectorAll(cellSelector))
+      .filter(isVisible)
+      .filter((el) => !/(disabled|prev|next|outside|not-current)/i.test(el.className.toString()))
+    const target = cells.find((el) => (el.textContent ?? "").trim() === String(day))
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+
+    function isVisible(el: Element): boolean {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    function visibleElement(selector: string): Element | null {
+      return Array.from(document.querySelectorAll(selector)).find(isVisible) ?? null
+    }
+  }, { popoverSelector: SCHEDULE_POPOVER, cellSelector: DATE_PICKER_CELL, day }, `date cell ${day}`)
+}
+
+async function getTimeOptionPoint(
+  page: Page,
+  column: number,
+  value: number,
+  suffix: "时" | "分",
+): Promise<PagePoint> {
+  const expected = String(value).padStart(2, "0")
+  await page.evaluate(
+    ({ popoverSelector, barSelector, optionSelector, column, expected, suffix }) => {
+      const popover = visibleElement(popoverSelector)
+      if (!popover) return null
+      const bars = Array.from(popover.querySelectorAll(barSelector)).filter(isVisible)
+      const bar = bars[column]
+      if (!bar) return null
+      const options = Array.from(bar.querySelectorAll(optionSelector))
+      const option = options.find((el) => {
+        const text = (el.textContent ?? "").replace(suffix, "").trim()
+        return text === expected
+      })
+      if (!option) return null
+      const barEl = bar as HTMLElement
+      const optionEl = option as HTMLElement
+      barEl.scrollTop =
+        optionEl.offsetTop - barEl.clientHeight / 2 + optionEl.offsetHeight / 2
+      return null
+
+      function isVisible(el: Element): boolean {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+      }
+      function visibleElement(selector: string): Element | null {
+        return Array.from(document.querySelectorAll(selector)).find(isVisible) ?? null
+      }
+    },
+    {
+      popoverSelector: SCHEDULE_POPOVER,
+      barSelector: TIME_PICKER_BAR,
+      optionSelector: TIME_PICKER_OPTION,
+      column,
+      expected,
+      suffix,
+    },
+  )
+  await delay(100)
+
+  return getPoint(page, ({ popoverSelector, barSelector, optionSelector, column, expected, suffix }) => {
+    const popover = visibleElement(popoverSelector)
+    if (!popover) return null
+    const bars = (Array.from(popover.querySelectorAll(barSelector)) as Element[])
+      .filter(isVisible)
+    const bar = bars[column]
+    if (!bar) return null
+    const options = Array.from(bar.querySelectorAll(optionSelector)) as Element[]
+    const target = options.find((el) => {
+      const text = (el.textContent ?? "").replace(suffix, "").trim()
+      return text === expected
+    })
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+
+    function isVisible(el: Element): boolean {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+    }
+    function visibleElement(selector: string): Element | null {
+      return Array.from(document.querySelectorAll(selector)).find(isVisible) ?? null
+    }
+  }, {
+    popoverSelector: SCHEDULE_POPOVER,
+    barSelector: TIME_PICKER_BAR,
+    optionSelector: TIME_PICKER_OPTION,
+    column,
+    expected,
+    suffix,
+  }, `time option ${expected}${suffix}`)
+}
+
+async function assertScheduleStuck(page: Page, expected: string): Promise<void> {
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    const state = await getScheduleState(page)
+    if (
+      state.inputValue === expected &&
+      state.checked &&
+      state.publishText?.includes("定时发布")
+    ) {
+      return
+    }
+    await delay(250)
+  }
+
+  throw new Error(
+    `Schedule did not stick. Expected ${expected}, got ${JSON.stringify(await getScheduleState(page))}`,
+  )
+}
+
+async function getScheduleInputValue(page: Page): Promise<string | null> {
+  const state = await getScheduleState(page)
+  return state.inputValue
 }
 
 interface XhsScheduleParts {
@@ -585,31 +764,190 @@ function formatScheduleInXhsTimezone(isoDate: string): XhsScheduleParts {
 async function clickPublish(page: Page): Promise<void> {
   await dismissPopover(page)
 
-  // Try the specific selector first
-  const btn = await page.$(PUBLISH_BTN)
-  if (btn) {
-    await btn.evaluate((el) => (el as HTMLElement).click())
-    return
+  const publishText = await getVisiblePublishButtonText(page)
+  await clickPoint(page, await getPublishButtonPoint(page))
+
+  if (publishText?.includes("定时发布")) {
+    await confirmPublishIfPrompted(page)
   }
 
-  // Fallback: find any button containing "发布" text
-  const clicked = await page.evaluate(() => {
-    const buttons = document.querySelectorAll("button")
-    for (const b of buttons) {
-      if (b.textContent?.includes("发布") && !b.disabled) {
-        b.click()
-        return true
-      }
+  await waitForPublishOutcome(page)
+}
+
+async function getVisiblePublishButtonText(page: Page): Promise<string | null> {
+  return page.evaluate((publishButtonSelector) => {
+    const button = Array.from(document.querySelectorAll(publishButtonSelector))
+      .find((el) => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden"
+        )
+      })
+    return button?.textContent?.trim() ?? null
+  }, PUBLISH_BTN, "publish button")
+}
+
+async function getPublishButtonPoint(page: Page): Promise<PagePoint> {
+  return getPoint(page, (publishButtonSelector) => {
+    const isVisible = (el: Element): boolean => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden"
+      )
     }
-    return false
-  })
+    const specific = Array.from(document.querySelectorAll(publishButtonSelector))
+      .find((el) => isVisible(el) && el.textContent?.includes("发布"))
+    const fallback = Array.from(document.querySelectorAll("button"))
+      .find((el) => isVisible(el) && el.textContent?.includes("发布") && !(el as HTMLButtonElement).disabled)
+    const target = specific ?? fallback
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  }, PUBLISH_BTN, "publish button")
+}
 
-  if (!clicked) {
-    throw new Error("Publish button not found")
+async function confirmPublishIfPrompted(page: Page): Promise<boolean> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const point = await page.evaluate(() => {
+      const isVisible = (el: Element): boolean => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden"
+        )
+      }
+      const modals = Array.from(
+        document.querySelectorAll(
+          '.d-modal, [class*="modal"], [class*="dialog"], [role="dialog"]',
+        ),
+      ).filter(isVisible)
+      for (const modal of modals) {
+        const modalText = modal.textContent ?? ""
+        if (!/(定时|预约|发布|确认|确定)/.test(modalText)) continue
+        const buttons = Array.from(modal.querySelectorAll("button"))
+          .filter((button) => isVisible(button) && !(button as HTMLButtonElement).disabled)
+        const target =
+          buttons.find((button) => /^(确认|确定)$/.test(button.textContent?.trim() ?? "")) ??
+          buttons.find((button) => /(确认|确定|发布|定时发布)/.test(button.textContent ?? ""))
+        if (!target) continue
+        const rect = target.getBoundingClientRect()
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      }
+      return null
+    })
+    if (point) {
+      await clickPoint(page, point)
+      await delay(500)
+      return true
+    }
+    await delay(250)
   }
+  return false
+}
+
+async function waitForPublishOutcome(page: Page): Promise<void> {
+  const deadline = Date.now() + PUBLISH_OUTCOME_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const state = await page.evaluate(() => {
+      const text = document.body.textContent?.replace(/\s+/g, " ").trim() ?? ""
+      const visibleModalText = Array.from(
+        document.querySelectorAll(
+          '.d-modal, [class*="modal"], [class*="dialog"], [role="dialog"]',
+        ),
+      )
+        .filter((el) => {
+          const rect = el.getBoundingClientRect()
+          const style = window.getComputedStyle(el)
+          return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+        })
+        .map((el) => el.textContent?.replace(/\s+/g, " ").trim() ?? "")
+        .join(" ")
+      return { url: location.href, text, visibleModalText }
+    })
+
+    if (/发布失败|提交失败|请稍后重试|网络异常|内容违规|操作失败/.test(state.text)) {
+      throw new Error(`Publish failed: ${state.text.slice(0, 500)}`)
+    }
+    if (/发布成功|定时发布成功|已提交|提交成功/.test(state.text)) {
+      return
+    }
+    if (state.url.includes("published=true")) {
+      return
+    }
+    if (!state.url.includes("/publish/publish")) {
+      return
+    }
+    if (state.visibleModalText && !/(确认|确定|知道了|发布|定时)/.test(state.visibleModalText)) {
+      throw new Error(`Unexpected publish dialog: ${state.visibleModalText.slice(0, 500)}`)
+    }
+
+    await delay(500)
+  }
+
+  const state = await page.evaluate(() => ({
+    url: location.href,
+    text: document.body.textContent?.replace(/\s+/g, " ").trim().slice(0, 1000) ?? "",
+  }))
+  throw new Error(`Publish outcome not confirmed: ${JSON.stringify(state)}`)
 }
 
 // ── shared helpers ───────────────────────────────────────────────────
+
+async function getPoint(
+  page: Page,
+  locator: (args: any) => PagePoint | null,
+  args: any,
+  label: string,
+): Promise<PagePoint> {
+  const point = await page.evaluate(locator as any, args) as PagePoint | null
+  if (!point) {
+    throw new Error(`Clickable point not found: ${label}`)
+  }
+  return point
+}
+
+async function clickPoint(page: Page, point: PagePoint): Promise<void> {
+  await page.mouse.move(point.x, point.y)
+  await page.mouse.down()
+  await delay(80)
+  await page.mouse.up()
+}
+
+async function waitForVisibleSelector(
+  page: Page,
+  selector: string,
+  timeout: number,
+): Promise<void> {
+  await page.waitForFunction(
+    (selector) => {
+      const candidates = Array.from(document.querySelectorAll(selector))
+      return candidates.some((el) => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden"
+        )
+      })
+    },
+    { timeout },
+    selector,
+  )
+}
 
 async function dismissPopover(page: Page): Promise<void> {
   const popover = await page.$(POPOVER)
